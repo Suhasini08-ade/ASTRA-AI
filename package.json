@@ -1,0 +1,14 @@
+{
+  "name": "jarvis-monorepo",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "npm --prefix frontend run dev",
+    "dev:frontend": "npm --prefix frontend run dev",
+    "dev:backend": "python -m uvicorn backend.app:app --reload",
+    "build": "npm --prefix frontend run build"
+  },
+  "dependencies": {
+    "firebase": "^12.17.1"
+  }
+}

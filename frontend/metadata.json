@@ -1,0 +1,6 @@
+{
+  "name": "AI Productivity Assistant",
+  "description": "Enterprise AI SaaS productivity platform with editable User Profile, Personalization, Custom Dashboard Widgets, Feature Marketplace, Gemini 3.6 Chat, Neural Voice Agent, File Summarizer, Kanban Tasks, Notes, Calendar, Weather, News, and Utility Micro-Tools.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
