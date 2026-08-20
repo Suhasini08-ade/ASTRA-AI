@@ -61,6 +61,91 @@ function limitToShortSentences(text: string, maxSentences: number = 2): string {
 }
 
 /**
+ * Sanitizes AI response text for clean, human-readable UI display in the Voice Assistant panel.
+ * Converts markdown tables into readable bullet text and strips raw Markdown syntax, code blocks,
+ * headers, dividers, and tool metadata.
+ */
+export function cleanTextForDisplay(text: string): string {
+  if (!text || typeof text !== 'string') {
+    return '';
+  }
+
+  let cleaned = text;
+
+  // 1. Process markdown tables (| Col 1 | Col 2 |) into bullet items
+  const lines = cleaned.split('\n');
+  const processedLines: string[] = [];
+  let inTable = false;
+  let tableHeaders: string[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (line.startsWith('|') && line.endsWith('|')) {
+      const cells = line.split('|').map(c => c.trim()).filter(c => c.length > 0);
+
+      // Check if it's separator row like |---|---|
+      if (cells.every(c => /^[-:]+$/.test(c))) {
+        inTable = true;
+        continue;
+      }
+
+      if (!inTable) {
+        // Table header line
+        tableHeaders = cells.map(h => h.replace(/[*#_]/g, ''));
+      } else {
+        // Data row
+        const rowPairs: string[] = [];
+        cells.forEach((cell, idx) => {
+          const header = tableHeaders[idx] || `Field ${idx + 1}`;
+          if (cell && cell !== '#' && header.toLowerCase() !== '#') {
+            rowPairs.push(`${header}: ${cell}`);
+          }
+        });
+        if (rowPairs.length > 0) {
+          processedLines.push(`• ${rowPairs.join(', ')}`);
+        }
+      }
+    } else {
+      if (inTable) {
+        inTable = false;
+        tableHeaders = [];
+      }
+      processedLines.push(lines[i]);
+    }
+  }
+  cleaned = processedLines.join('\n');
+
+  // 2. Remove fenced code blocks (```...```)
+  cleaned = cleaned.replace(/```[\s\S]*?```/g, '');
+
+  // 3. Remove inline code (`...`)
+  cleaned = cleaned.replace(/`([^`]+)`/g, '$1');
+
+  // 4. Remove horizontal rule lines / separators (---, ===, ***, ___)
+  cleaned = cleaned.replace(/^[\s\-_*=#]{3,}\s*$/gm, '');
+
+  // 5. Remove Markdown headers (# Header, ## Header, etc.)
+  cleaned = cleaned.replace(/^#{1,6}\s+/gm, '');
+
+  // 6. Remove Markdown bold/italic/strikethrough (**text**, *text*, __text__, _text_, ~~text~~)
+  cleaned = cleaned.replace(/(\*\*|__|\*|_|~~)(.*?)\1/g, '$2');
+
+  // 7. Remove Markdown links [text](url) -> text
+  cleaned = cleaned.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1');
+
+  // 8. Remove JSON structures
+  cleaned = cleaned.replace(/\{[\s\S]*?\}/g, '');
+
+  // 9. Remove key-value metadata blocks if raw tool output (e.g. "Tool: ...", "Action: ...", "ID: ...")
+  cleaned = cleaned.replace(/^(Tool|Result|Action|ID):\s*.*$/gim, '');
+
+  // 10. Consolidate excessive blank lines
+  cleaned = cleaned.replace(/\n{3,}/g, '\n\n').trim();
+
+  return cleaned;
+}
+
+/**
  * Sanitizes AI response text into a concise, natural, 1-2 sentence spoken response.
  * Strips code blocks, markdown, technical metadata, IDs, URLs, and converts dates naturally.
  */

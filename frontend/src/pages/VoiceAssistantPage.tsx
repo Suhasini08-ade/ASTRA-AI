@@ -1,21 +1,17 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useRef } from 'react';
 import { motion } from 'motion/react';
 import { 
   Mic, 
-  MicOff, 
   Volume2, 
   VolumeX, 
-  Sparkles, 
   Radio, 
   Bot, 
-  RefreshCw,
-  Activity,
-  Zap,
-  Play,
+  Zap, 
+  Play, 
   Square
 } from 'lucide-react';
 import { sendVoicePrompt } from '../services/api';
-import { cleanTextForSpeech } from '../utils/speechUtils';
+import { cleanTextForSpeech, cleanTextForDisplay } from '../utils/speechUtils';
 
 export const VoiceAssistantPage: React.FC = () => {
   const [isListening, setIsListening] = useState(false);
@@ -25,6 +21,8 @@ export const VoiceAssistantPage: React.FC = () => {
   const [status, setStatus] = useState<'idle' | 'listening' | 'processing' | 'speaking' | 'error'>('idle');
 
   const recognitionRef = useRef<any>(null);
+  const latestTranscriptRef = useRef<string>('');
+  const isProcessingRef = useRef<boolean>(false);
 
   // Stop speech synthesis immediately
   const stopSpeaking = () => {
@@ -68,7 +66,7 @@ export const VoiceAssistantPage: React.FC = () => {
     };
 
     utterance.onerror = (e) => {
-      console.warn('Speech synthesis error:', e);
+      console.warn('[VOICE] Speech synthesis error:', e);
       setIsSpeaking(false);
       setStatus('error');
     };
@@ -77,8 +75,14 @@ export const VoiceAssistantPage: React.FC = () => {
   };
 
   const startListening = () => {
-    // If speaking, stop audio immediately before listening
+    // Stop any ongoing speech audio immediately
     stopSpeaking();
+
+    // Reset session variables & refs
+    latestTranscriptRef.current = '';
+    isProcessingRef.current = false;
+
+    console.log('[VOICE] session started');
 
     if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
       setStatus('error');
@@ -102,31 +106,53 @@ export const VoiceAssistantPage: React.FC = () => {
       };
 
       recognition.onresult = (event: any) => {
-        const currentTranscript = Array.from(event.results)
-          .map((result: any) => result[0].transcript)
-          .join('');
-        setTranscript(currentTranscript);
+        let interim = '';
+        let final = '';
+
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+          const part = event.results[i][0].transcript;
+          if (event.results[i].isFinal) {
+            final += part;
+          } else {
+            interim += part;
+          }
+        }
+
+        if (final) {
+          latestTranscriptRef.current = (latestTranscriptRef.current + ' ' + final).trim();
+        }
+
+        const currentText = latestTranscriptRef.current || interim;
+        if (currentText) {
+          setTranscript(currentText);
+        }
       };
 
       recognition.onerror = (event: any) => {
-        console.error('Speech recognition error:', event);
+        console.error('[VOICE] Speech recognition error:', event.error || event);
         setIsListening(false);
         setStatus('error');
         setTranscript("Sorry, I couldn't understand that. Please try again.");
       };
 
-      recognition.onend = async () => {
+      recognition.onend = () => {
         setIsListening(false);
-        if (transcript && transcript !== 'Listening to your voice...' && !transcript.includes("couldn't understand")) {
-          processVoicePrompt(transcript);
-        } else if (status !== 'error') {
+        const textToSend = latestTranscriptRef.current.trim();
+
+        if (textToSend && !isProcessingRef.current) {
+          isProcessingRef.current = true;
+          console.log(`[VOICE] final transcript: "${textToSend}"`);
+          processVoicePrompt(textToSend);
+        } else if (!isProcessingRef.current) {
+          console.log('[VOICE] no speech detected');
           setStatus('idle');
+          setTranscript("I didn't catch that. Please try again.");
         }
       };
 
       recognition.start();
     } catch (err) {
-      console.error(err);
+      console.error('[VOICE] Exception starting speech recognition:', err);
       setIsListening(false);
       setStatus('error');
       setTranscript("Sorry, I couldn't understand that. Please try again.");
@@ -135,7 +161,9 @@ export const VoiceAssistantPage: React.FC = () => {
 
   const stopListening = () => {
     if (recognitionRef.current) {
-      recognitionRef.current.stop();
+      try {
+        recognitionRef.current.stop();
+      } catch (_) {}
     }
     setIsListening(false);
     setStatus('idle');
@@ -143,15 +171,27 @@ export const VoiceAssistantPage: React.FC = () => {
 
   const processVoicePrompt = async (promptText: string) => {
     stopSpeaking();
+    console.log('[VOICE] sending request');
     setStatus('processing');
+
     try {
       const reply = await sendVoicePrompt(promptText);
-      setAiResponse(reply);
+      console.log('[VOICE] response received');
+      
+      // Clean and format text for UI display panel
+      const displayReply = cleanTextForDisplay(reply);
+      setAiResponse(displayReply);
+
+      // Clean and speak text for TTS audio
+      console.log('[VOICE] speaking');
       speakText(reply);
     } catch (err) {
+      console.error('[VOICE] API request failed:', err);
       const fallback = `I heard: "${promptText}". All backend systems active.`;
       setAiResponse(fallback);
       speakText(fallback);
+    } finally {
+      isProcessingRef.current = false;
     }
   };
 
@@ -300,7 +340,7 @@ export const VoiceAssistantPage: React.FC = () => {
               </button>
             )}
           </div>
-          <div className="p-4 rounded-2xl bg-slate-950/70 border border-white/5 min-h-[100px] text-xs text-slate-200 leading-relaxed">
+          <div className="p-4 rounded-2xl bg-slate-950/70 border border-white/5 min-h-[100px] text-xs text-slate-200 leading-relaxed whitespace-pre-wrap">
             {aiResponse}
           </div>
         </div>
@@ -318,6 +358,7 @@ export const VoiceAssistantPage: React.FC = () => {
             <button
               key={idx}
               onClick={() => {
+                latestTranscriptRef.current = prompt;
                 setTranscript(prompt);
                 processVoicePrompt(prompt);
               }}
