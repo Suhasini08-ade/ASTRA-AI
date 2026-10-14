@@ -14,11 +14,13 @@ export default function Sidebar({ isOpen, onClose }) {
     { name: 'Voice AI', path: '/app/voice', icon: 'mic' },
     { name: 'Tasks', path: '/app/tasks', icon: 'check_circle' },
     { name: 'Calendar', path: '/app/calendar', icon: 'calendar_today' },
+    { name: 'Reminders', path: '/app/reminders', icon: 'alarm' },
     { name: 'Notes', path: '/app/notes', icon: 'note_alt' },
     { name: 'Doc Summarizer', path: '/app/docs', icon: 'summarize' },
     { name: 'Weather', path: '/app/weather', icon: 'cloud' },
     { name: 'News Feed', path: '/app/news', icon: 'article' },
   ];
+
 
   return (
     <>
@@ -41,9 +43,7 @@ export default function Sidebar({ isOpen, onClose }) {
             <h1 className="font-headline text-2xl font-extrabold text-primary dark:text-blue-400 tracking-tight">
               Astra AI
             </h1>
-            <p className="font-label text-xs text-on-surface-variant dark:text-slate-400">
-              Unified Intelligence
-            </p>
+
           </div>
           <div className="flex items-center gap-1">
             <button
@@ -68,7 +68,7 @@ export default function Sidebar({ isOpen, onClose }) {
         </div>
 
         {/* Main Navigation Links */}
-        <nav className="flex-1 space-y-1 overflow-y-auto pr-1">
+        <nav className="flex-1 space-y-1">
           {navItems.map((item) => (
             <NavLink
               key={item.path}

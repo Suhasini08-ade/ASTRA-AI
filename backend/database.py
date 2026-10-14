@@ -122,7 +122,13 @@ async def _create_indexes(db: AsyncIOMotorDatabase) -> None:
     # Settings
     await db.settings.create_index("user_id", unique=True)
 
-    # Activity Log
-    await db.activity_log.create_index("user_id")
-    await db.activity_log.create_index("timestamp")
+    # Knowledge Items (for Qdrant metadata and vector mirror)
+    await db.knowledge_items.create_index([("user_id", 1), ("content_hash", 1)])
+    await db.knowledge_items.create_index([("user_id", 1), ("category", 1)])
+    await db.knowledge_items.create_index([("user_id", 1), ("created_at", -1)])
+
+    # Documents & Files (ingested PDFs, DOCX, TXT)
+    await db.documents.create_index([("user_id", 1), ("file_name", 1)])
+    await db.documents.create_index([("user_id", 1), ("created_at", -1)])
+
     logger.info("MongoDB indexes created successfully.")

@@ -34,6 +34,16 @@ export default function TopHeader({ onToggleSidebar }) {
           <span className="material-symbols-outlined text-2xl">menu</span>
         </button>
 
+        {/* Back Button */}
+        <button
+          onClick={() => navigate(-1)}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-on-surface-variant dark:text-slate-400 hover:bg-surface-container-high dark:hover:bg-slate-800 hover:text-primary dark:hover:text-blue-400 transition-all duration-200 text-sm font-medium group"
+          title="Go Back"
+        >
+          <span className="material-symbols-outlined text-lg transition-transform duration-200 group-hover:-translate-x-0.5">arrow_back</span>
+          <span className="hidden sm:inline">Back</span>
+        </button>
+
         <nav className="hidden md:flex gap-6">
           {['Focus', 'Deep Dive', 'Explore'].map((tab) => (
             <button
@@ -107,15 +117,6 @@ export default function TopHeader({ onToggleSidebar }) {
             </div>
           )}
         </div>
-
-        {/* History */}
-        <button
-          onClick={() => navigate('/app/assistant')}
-          className="p-2 rounded-full hover:bg-surface-container-high dark:hover:bg-slate-800 transition-colors text-on-surface-variant dark:text-slate-300"
-          title="Recent Conversations"
-        >
-          <span className="material-symbols-outlined text-xl">history</span>
-        </button>
 
         {/* User Profile Menu Dropdown */}
         <div className="relative">

@@ -208,9 +208,7 @@ export default function AssistantPage() {
             <h2 className="font-headline text-lg font-bold text-on-surface dark:text-slate-100 flex items-center gap-2">
               <span>AI Assistant Workspace</span>
             </h2>
-            <p className="text-xs text-on-surface-variant dark:text-slate-400">
-              Connected to FastAPI AI Provider Engine
-            </p>
+
           </div>
         </div>
 

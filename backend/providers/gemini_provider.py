@@ -32,7 +32,7 @@ class GeminiProvider(BaseAIProvider):
     def __init__(self, api_key: str | None = None, model: str | None = None) -> None:
         settings = get_settings()
         key = api_key or settings.GEMINI_API_KEY
-        self._model = model or settings.GEMINI_MODEL or "gemini-2.5-flash"
+        self._model = model or settings.GEMINI_MODEL or "gemini-3.5-flash-lite"
         self._client: AsyncOpenAI | None = None
 
         if key:

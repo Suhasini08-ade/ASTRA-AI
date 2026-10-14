@@ -51,7 +51,7 @@ class Settings(BaseSettings):
         default="",
         validation_alias=AliasChoices("GEMINI_API_KEY", "GOOGLE_API_KEY"),
     )
-    GEMINI_MODEL: str = "gemini-2.5-flash"
+    GEMINI_MODEL: str = "gemini-3.5-flash-lite"
 
     # --- Groq (OpenAI-compatible API) ---
     GROQ_API_KEY: str = ""
@@ -71,6 +71,11 @@ class Settings(BaseSettings):
 
     # --- NewsAPI ---
     NEWS_API_KEY: str = ""
+
+    # --- Qdrant Vector Search ---
+    QDRANT_URL: str = ""
+    QDRANT_API_KEY: str = ""
+    QDRANT_COLLECTION: str = "astra_knowledge"
 
     # --- Firebase Admin SDK ---
     FIREBASE_SERVICE_ACCOUNT_PATH: str = "firebase-service-account.json"

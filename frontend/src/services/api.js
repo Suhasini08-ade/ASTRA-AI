@@ -180,10 +180,27 @@ export async function apiCreateEvent(eventData) {
   });
 }
 
+export async function apiGetReminders() {
+  return await fetchAPI('/api/reminders');
+}
+
 export async function apiCreateReminder(reminderData) {
   return await fetchAPI('/api/reminders', {
     method: 'POST',
     body: JSON.stringify(reminderData),
+  });
+}
+
+export async function apiUpdateReminder(reminderId, reminderData) {
+  return await fetchAPI(`/api/reminders/${reminderId}`, {
+    method: 'PUT',
+    body: JSON.stringify(reminderData),
+  });
+}
+
+export async function apiDeleteReminder(reminderId) {
+  return await fetchAPI(`/api/reminders/${reminderId}`, {
+    method: 'DELETE',
   });
 }
 

@@ -18,6 +18,7 @@ import FeaturesPage from './pages/FeaturesPage';
 import PricingPage from './pages/PricingPage';
 import DocsPage from './pages/DocsPage';
 import DeepDivePage from './pages/DeepDivePage';
+import RemindersPage from './pages/RemindersPage';
 import { LoginPage, SignupPage, RecoverPasswordPage, ResetPasswordPage } from './pages/AuthPages';
 
 function AppLayout() {
@@ -63,6 +64,7 @@ export default function App() {
         <Route path="deep-dive" element={<DeepDivePage />} />
         <Route path="calendar" element={<CalendarPage />} />
         <Route path="notes" element={<NotesPage />} />
+        <Route path="reminders" element={<RemindersPage />} />
         <Route path="docs" element={<DocsPage />} />
         <Route path="weather" element={<WeatherPage />} />
         <Route path="news" element={<NewsPage />} />

@@ -64,6 +64,9 @@ class ProviderRouter(BaseAIProvider):
                 reason = exc.reason or str(exc)
                 logger.warning("%s failed: %s", display_name.capitalize(), reason)
                 last_error = exc
+                if not exc.retryable or exc.configuration_error:
+                    # Do not fall back on configuration errors or non-retryable errors
+                    raise
             except Exception as exc:
                 reason = "unexpected error"
                 logger.warning("%s failed: %s", display_name.capitalize(), reason)

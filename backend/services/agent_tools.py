@@ -18,6 +18,7 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 from pymongo.errors import PyMongoError
 
 from backend.config import get_settings
+from backend.services.knowledge_service import knowledge_service
 from backend.services.news_service import news_service
 from backend.services.weather_service import weather_service
 
@@ -400,6 +401,59 @@ AGENT_TOOLS = [
                     },
                 },
                 "required": ["file_content"],
+            },
+        },
+    },
+    # --- KNOWLEDGE BASE & SEMANTIC SEARCH (QDRANT + ATLAS) ---
+    {
+        "type": "function",
+        "function": {
+            "name": "search_knowledge",
+            "description": "Semantically search the user's private knowledge base, memory, notes, and documents in Qdrant.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Natural language question or search phrase.",
+                    },
+                    "category": {
+                        "type": "string",
+                        "enum": ["general", "document", "note", "preference"],
+                        "description": "Optional category filter.",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of relevant results to return (default 5).",
+                    },
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "save_knowledge",
+            "description": "Save important user facts, knowledge, notes, or long-term memory into Qdrant & MongoDB.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "text": {
+                        "type": "string",
+                        "description": "The information or memory text to store.",
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "Short title or label for this knowledge item.",
+                    },
+                    "category": {
+                        "type": "string",
+                        "enum": ["general", "document", "note", "preference"],
+                        "description": "Category for organizational filtering.",
+                    },
+                },
+                "required": ["text"],
             },
         },
     },
@@ -992,6 +1046,49 @@ async def execute_agent_tool(
     # Document Summarizer
     elif tool_name == "summarize_document":
         return await _summarize_document(arguments)
+
+    # Knowledge Base & Semantic Search (Qdrant + Atlas)
+    elif tool_name == "search_knowledge":
+        query = arguments.get("query", "").strip()
+        category = arguments.get("category")
+        limit = int(arguments.get("limit", 5))
+        try:
+            results = await knowledge_service.search_knowledge(
+                user_id=user_id,
+                query=query,
+                category=category,
+                limit=limit,
+            )
+            return {
+                "status": "success",
+                "count": len(results),
+                "query": query,
+                "results": results,
+            }
+        except Exception as exc:
+            logger.error("Error executing search_knowledge tool: %s", exc)
+            return {"status": "error", "message": str(exc), "results": []}
+
+    elif tool_name == "save_knowledge":
+        text = arguments.get("text", "").strip()
+        title = arguments.get("title")
+        category = arguments.get("category", "general")
+        try:
+            saved = await knowledge_service.save_knowledge_item(
+                db=db,
+                user_id=user_id,
+                text=text,
+                title=title,
+                category=category,
+            )
+            return {
+                "status": "success",
+                "message": f"Successfully stored in private knowledge base under '{category}'.",
+                "item": saved,
+            }
+        except Exception as exc:
+            logger.error("Error executing save_knowledge tool: %s", exc)
+            return {"status": "error", "message": str(exc)}
 
     else:
         return {"error": f"Unknown tool name: {tool_name}"}

@@ -24,6 +24,7 @@ from backend.providers import (
     get_ai_provider,
 )
 from backend.services.agent_tools import AGENT_TOOLS, execute_agent_tool
+from backend.services.knowledge_service import knowledge_service
 from backend.services.intelligence_engine.decision_engine import DecisionEngine
 from backend.services.intelligence_engine.engine import IntelligenceEngine
 from backend.services.intelligence_engine.schemas import (
@@ -53,6 +54,9 @@ class AIService:
         """Generate one provider-independent AI turn through the configured router."""
         try:
             return await self._provider.chat_completion(messages=messages, tools=tools)
+        except AIProviderConfigurationError as exc:
+            logger.warning("AI provider configuration error: %s", exc)
+            return AIProviderResponse(content=str(exc))
         except (AIProviderError, Exception) as exc:
             logger.warning("AI generation failed after attempting configured providers: %s", exc)
             return AIProviderResponse(
@@ -139,11 +143,33 @@ class AIService:
             system_prompt = (
                 "You are Jarvis, a highly capable and friendly AI productivity assistant. "
                 "You help users manage tasks, take notes, set reminders, manage calendar events, check weather, get news, and summarize documents. "
+                "You also have access to the user's private knowledge base, memory, and uploaded documents in Qdrant vector storage. "
                 "When a user request requires multiple actions (for example: checking weather AND setting a reminder, or viewing tasks AND creating a note), "
                 "you MUST invoke all necessary function tools (either simultaneously in one turn or sequentially across turns) before providing your final response. "
                 "Combine and summarize the execution results of ALL tools into a single cohesive, natural, clear, and professional response. "
                 f"The current UTC date and time is {current_time_str}. Use this exact timestamp to calculate relative dates like 'tomorrow', 'next week', or 'in 2 hours'."
             )
+
+        # Retrieve relevant semantic knowledge from Qdrant vector memory
+        try:
+            matched_knowledge = await knowledge_service.search_knowledge(
+                user_id=user_id,
+                query=message.strip(),
+                limit=3,
+                score_threshold=0.45,
+            )
+            if matched_knowledge:
+                snippets = "\n".join(
+                    f"- [{item.get('title') or item.get('source', 'Knowledge')}]: {item.get('text')}"
+                    for item in matched_knowledge
+                )
+                system_prompt += (
+                    "\n\n[RELEVANT USER MEMORY & KNOWLEDGE FROM QDRANT]:\n"
+                    f"{snippets}\n"
+                    "Use this relevant context when answering the user's inquiry."
+                )
+        except Exception as k_err:
+            logger.warning("Knowledge pre-fetch failed silently: %s", k_err)
 
         openai_messages: list[dict[str, Any]] = [{"role": "system", "content": system_prompt}]
         openai_messages.extend(

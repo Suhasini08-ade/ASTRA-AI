@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from backend.database import connect_db, close_db
 from backend.config import get_settings
-from backend.routes import agent, auth, calendar, chat, deep_dive, focus_sessions, news, notes, reminders, summarize, tasks, voice, weather
+from backend.routes import agent, auth, calendar, chat, deep_dive, focus_sessions, knowledge, news, notes, reminders, summarize, tasks, voice, weather
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -55,6 +55,7 @@ app.include_router(reminders.router)
 app.include_router(weather.router)
 app.include_router(news.router)
 app.include_router(summarize.router)
+app.include_router(knowledge.router)
 app.include_router(deep_dive.router)
 app.include_router(voice.router)
 
