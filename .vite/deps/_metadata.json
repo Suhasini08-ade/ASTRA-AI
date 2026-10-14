@@ -1,0 +1,52 @@
+{
+  "hash": "d2fb655c",
+  "configHash": "8fb3ade9",
+  "lockfileHash": "58a4c616",
+  "browserHash": "599c7a18",
+  "optimized": {
+    "firebase/app": {
+      "src": "../../node_modules/firebase/app/dist/esm/index.esm.js",
+      "file": "firebase_app.js",
+      "fileHash": "2f86c797",
+      "needsInterop": false
+    },
+    "firebase/auth": {
+      "src": "../../node_modules/firebase/auth/dist/esm/index.esm.js",
+      "file": "firebase_auth.js",
+      "fileHash": "409e8c76",
+      "needsInterop": false
+    },
+    "react": {
+      "src": "../../node_modules/react/index.js",
+      "file": "react.js",
+      "fileHash": "8a4babcd",
+      "needsInterop": true
+    },
+    "react-dom/client": {
+      "src": "../../node_modules/react-dom/client.js",
+      "file": "react-dom_client.js",
+      "fileHash": "fbe82dfb",
+      "needsInterop": true
+    },
+    "react-router-dom": {
+      "src": "../../node_modules/react-router-dom/dist/index.js",
+      "file": "react-router-dom.js",
+      "fileHash": "e6f58ce9",
+      "needsInterop": false
+    }
+  },
+  "chunks": {
+    "chunk-ACV2S2IB": {
+      "file": "chunk-ACV2S2IB.js"
+    },
+    "chunk-SN6CXD3Q": {
+      "file": "chunk-SN6CXD3Q.js"
+    },
+    "chunk-CEPEYVT6": {
+      "file": "chunk-CEPEYVT6.js"
+    },
+    "chunk-5WRI5ZAA": {
+      "file": "chunk-5WRI5ZAA.js"
+    }
+  }
+}
