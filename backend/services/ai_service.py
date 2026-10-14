@@ -55,13 +55,16 @@ class AIService:
         try:
             return await self._provider.chat_completion(messages=messages, tools=tools)
         except AIProviderConfigurationError as exc:
-            logger.warning("AI provider configuration error: %s", exc)
-            return AIProviderResponse(content=str(exc))
-        except (AIProviderError, Exception) as exc:
-            logger.warning("AI generation failed after attempting configured providers: %s", exc)
+            logger.error("AI provider configuration error (check .env API keys/models): %s", exc)
             return AIProviderResponse(
-                content="AI services are temporarily unavailable. Please try again later."
+                content="I'm having trouble connecting to the AI service. Please check your API keys and model settings in the backend configuration."
             )
+        except (AIProviderError, Exception) as exc:
+            logger.warning("AI generation failed after attempting all configured providers: %s", exc)
+            return AIProviderResponse(
+                content="I'm temporarily unavailable. Please try again in a moment."
+            )
+
 
     async def send_message(
         self,

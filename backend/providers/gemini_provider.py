@@ -54,7 +54,6 @@ class GeminiProvider(BaseAIProvider):
             "model": self._model,
             "messages": messages,
             "temperature": 0.7,
-            "max_tokens": 700,
         }
 
         if tools:
@@ -83,7 +82,7 @@ class GeminiProvider(BaseAIProvider):
 
         except APIStatusError as exc:
             status_code = exc.status_code
-            logger.warning("Gemini request failed with status %s", status_code)
+            logger.warning("Gemini request failed with status %s: %s", status_code, exc)
             if status_code in {401, 403}:
                 raise AIProviderConfigurationError(
                     "Gemini configuration is invalid. Verify GEMINI_API_KEY in backend/.env.",
@@ -105,14 +104,14 @@ class GeminiProvider(BaseAIProvider):
                     reason="quota exceeded / rate limit",
                     status_code=status_code,
                 ) from exc
-            if status_code in {408, 500, 502, 503, 504}:
+            if status_code in {400, 408, 500, 502, 503, 504}:
                 raise AIProviderTemporaryError(
-                    "Gemini service is temporarily unavailable.",
+                    f"Gemini service error ({status_code}).",
                     provider="gemini",
-                    reason="temporary service unavailable",
+                    reason=f"status code {status_code}",
                     status_code=status_code,
                 ) from exc
-            raise AIProviderRequestError(
+            raise AIProviderTemporaryError(
                 "Gemini request failed.",
                 provider="gemini",
                 reason=f"status code {status_code}",

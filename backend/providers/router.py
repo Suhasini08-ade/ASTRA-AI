@@ -62,17 +62,15 @@ class ProviderRouter(BaseAIProvider):
                 return result
             except AIProviderError as exc:
                 reason = exc.reason or str(exc)
-                logger.warning("%s failed: %s", display_name.capitalize(), reason)
+                logger.warning("%s failed (%s) — trying fallback if available.", display_name.capitalize(), reason)
                 last_error = exc
-                if not exc.retryable or exc.configuration_error:
-                    # Do not fall back on configuration errors or non-retryable errors
-                    raise
             except Exception as exc:
-                reason = "unexpected error"
-                logger.warning("%s failed: %s", display_name.capitalize(), reason)
+                logger.warning("%s unexpected failure (%s) — trying fallback if available.", display_name.capitalize(), exc)
                 last_error = exc
+
 
         logger.error("All configured AI providers failed.")
         raise AIProviderTemporaryError(
             "AI services are temporarily unavailable. Please try again later."
         ) from last_error
+
