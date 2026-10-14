@@ -7,9 +7,10 @@ for the Jarvis AI Agent.
 Reuses existing MongoDB collections and service layers without duplicate logic.
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
 import logging
+import re
 from typing import Any
 
 from bson import ObjectId
@@ -88,19 +89,20 @@ AGENT_TOOLS = [
         "type": "function",
         "function": {
             "name": "update_task",
-            "description": "Update an existing task by ID.",
+            "description": "Update an existing task by ID or by title.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "task_id": {
                         "type": "string",
-                        "description": "The MongoDB ID string of the task.",
+                        "description": "The MongoDB ID or title of the task to update.",
                     },
-                    "title": {"type": "string"},
+                    "title": {"type": "string", "description": "The current title or new title."},
+                    "new_title": {"type": "string", "description": "Optional new title if renaming."},
                     "description": {"type": "string"},
                     "due_date": {
                         "type": "string",
-                        "description": "ISO 8601 due date string.",
+                        "description": "ISO 8601 due date string or relative date like 'tomorrow'.",
                     },
                     "priority": {
                         "type": "string",
@@ -111,7 +113,7 @@ AGENT_TOOLS = [
                         "enum": ["todo", "in_progress", "done"],
                     },
                 },
-                "required": ["task_id"],
+                "required": [],
             },
         },
     },
@@ -119,16 +121,20 @@ AGENT_TOOLS = [
         "type": "function",
         "function": {
             "name": "delete_task",
-            "description": "Delete a task by ID.",
+            "description": "Delete a task by ID or by title.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "task_id": {
                         "type": "string",
-                        "description": "The MongoDB ID string of the task to delete.",
+                        "description": "The MongoDB ID or title of the task to delete.",
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "The title of the task to delete.",
                     },
                 },
-                "required": ["task_id"],
+                "required": [],
             },
         },
     },
@@ -172,22 +178,22 @@ AGENT_TOOLS = [
         "type": "function",
         "function": {
             "name": "update_note",
-            "description": "Update an existing note by ID.",
+            "description": "Update an existing note by ID or by title.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "note_id": {
                         "type": "string",
-                        "description": "MongoDB ID string of the note.",
+                        "description": "MongoDB ID or title of the note.",
                     },
-                    "title": {"type": "string"},
+                    "title": {"type": "string", "description": "Current title or new title."},
                     "content": {"type": "string"},
                     "tags": {
                         "type": "array",
                         "items": {"type": "string"},
                     },
                 },
-                "required": ["note_id"],
+                "required": [],
             },
         },
     },
@@ -195,16 +201,17 @@ AGENT_TOOLS = [
         "type": "function",
         "function": {
             "name": "delete_note",
-            "description": "Delete a note by ID.",
+            "description": "Delete a note by ID or by title.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "note_id": {
                         "type": "string",
-                        "description": "MongoDB ID string of the note.",
+                        "description": "MongoDB ID or title of the note.",
                     },
+                    "title": {"type": "string", "description": "The title of the note to delete."},
                 },
-                "required": ["note_id"],
+                "required": [],
             },
         },
     },
@@ -223,7 +230,7 @@ AGENT_TOOLS = [
                     },
                     "due_time": {
                         "type": "string",
-                        "description": "Due time in ISO 8601 format (e.g. '2026-08-12T09:00:00Z').",
+                        "description": "Due time in ISO 8601 format or relative time like 'tomorrow at 9am'.",
                     },
                     "repeat": {
                         "type": "string",
@@ -250,23 +257,23 @@ AGENT_TOOLS = [
         "type": "function",
         "function": {
             "name": "update_reminder",
-            "description": "Update an existing reminder by ID.",
+            "description": "Update an existing reminder by ID or by message.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "reminder_id": {
                         "type": "string",
-                        "description": "MongoDB ID string of the reminder.",
+                        "description": "MongoDB ID or message/title of the reminder.",
                     },
                     "message": {"type": "string"},
                     "due_time": {
                         "type": "string",
-                        "description": "ISO 8601 format due time.",
+                        "description": "ISO 8601 format due time or relative time.",
                     },
                     "repeat": {"type": "string"},
                     "is_active": {"type": "boolean"},
                 },
-                "required": ["reminder_id"],
+                "required": [],
             },
         },
     },
@@ -274,16 +281,20 @@ AGENT_TOOLS = [
         "type": "function",
         "function": {
             "name": "delete_reminder",
-            "description": "Delete a reminder by ID.",
+            "description": "Delete a reminder by ID or by message.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "reminder_id": {
                         "type": "string",
-                        "description": "MongoDB ID string of the reminder.",
+                        "description": "MongoDB ID or message/title of the reminder to delete.",
+                    },
+                    "message": {
+                        "type": "string",
+                        "description": "The reminder message to delete.",
                     },
                 },
-                "required": ["reminder_id"],
+                "required": [],
             },
         },
     },
@@ -327,7 +338,7 @@ AGENT_TOOLS = [
                     },
                     "end_time": {
                         "type": "string",
-                        "description": "Event end time in ISO 8601 format (e.g. '2026-08-12T15:00:00Z').",
+                        "description": "Optional event end time (defaults to 1 hour after start_time).",
                     },
                     "description": {
                         "type": "string",
@@ -338,10 +349,51 @@ AGENT_TOOLS = [
                         "description": "Hex color code. Default is '#4f46e5'.",
                     },
                 },
-                "required": ["title", "start_time", "end_time"],
+                "required": ["title", "start_time"],
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "update_calendar_event",
+            "description": "Update an existing calendar event by ID or title.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "event_id": {
+                        "type": "string",
+                        "description": "MongoDB ID or title of the calendar event to update.",
+                    },
+                    "title": {"type": "string", "description": "Current title or new title."},
+                    "description": {"type": "string"},
+                    "start_time": {"type": "string", "description": "ISO 8601 start time."},
+                    "end_time": {"type": "string", "description": "ISO 8601 end time."},
+                    "color": {"type": "string"},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "delete_calendar_event",
+            "description": "Delete a calendar event by ID or title.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "event_id": {
+                        "type": "string",
+                        "description": "MongoDB ID or title of the calendar event to delete.",
+                    },
+                    "title": {"type": "string", "description": "Title of the event to delete."},
+                },
+                "required": [],
+            },
+        },
+    },
+
     # --- WEATHER ---
     {
         "type": "function",
@@ -465,9 +517,31 @@ AGENT_TOOLS = [
 # ============================================================================
 
 def _parse_iso_datetime(dt_str: str | None) -> datetime | None:
-    """Parse ISO datetime string into UTC datetime object."""
-    if not dt_str:
+    """Parse ISO or relative datetime string into UTC datetime object."""
+    if not dt_str or not isinstance(dt_str, str):
         return None
+    raw = dt_str.strip().lower()
+    now = datetime.now(timezone.utc)
+
+    # Relative shortcuts
+    if raw in {"tomorrow", "tmrw"}:
+        return (now + timedelta(days=1)).replace(hour=18, minute=0, second=0, microsecond=0)
+    if raw in {"today", "tonight"}:
+        return (now + timedelta(hours=3)).replace(minute=0, second=0, microsecond=0)
+    if "tomorrow" in raw:
+        time_match = re.search(r"(\d{1,2})(?::(\d{2}))?\s*(am|pm)?", raw)
+        hour, minute = 18, 0
+        if time_match:
+            h = int(time_match.group(1))
+            m = int(time_match.group(2) or 0)
+            ampm = (time_match.group(3) or "").lower()
+            if ampm == "pm" and h < 12:
+                h += 12
+            elif ampm == "am" and h == 12:
+                h = 0
+            hour, minute = h, m
+        return (now + timedelta(days=1)).replace(hour=hour, minute=minute, second=0, microsecond=0)
+
     try:
         clean_str = dt_str.replace("Z", "+00:00")
         dt = datetime.fromisoformat(clean_str)
@@ -475,6 +549,12 @@ def _parse_iso_datetime(dt_str: str | None) -> datetime | None:
             dt = dt.replace(tzinfo=timezone.utc)
         return dt
     except Exception:
+        try:
+            parts = [int(p) for p in re.findall(r"\d+", dt_str)]
+            if len(parts) >= 3:
+                return datetime(parts[0], parts[1], parts[2], 18, 0, 0, tzinfo=timezone.utc)
+        except Exception:
+            pass
         return None
 
 
@@ -483,6 +563,75 @@ def _format_datetime(dt: Any) -> str | None:
     if isinstance(dt, datetime):
         return dt.isoformat()
     return str(dt) if dt else None
+
+
+async def _resolve_item(
+    collection,
+    user_id: str,
+    id_val: Any = None,
+    title_val: Any = None,
+    title_field: str = "title",
+) -> dict[str, Any] | None:
+    """Resolve an item from MongoDB by ObjectId or by case-insensitive title/message search."""
+    # 1. Try direct ObjectId lookup
+    if id_val and isinstance(id_val, str) and ObjectId.is_valid(id_val):
+        doc = await collection.find_one({"_id": ObjectId(id_val), "user_id": user_id})
+        if doc:
+            return doc
+
+    # 2. Extract search term
+    search_term = ""
+    if title_val and isinstance(title_val, str) and title_val.strip():
+        search_term = title_val.strip()
+    elif id_val and isinstance(id_val, str) and id_val.strip() and not ObjectId.is_valid(id_val):
+        search_term = id_val.strip()
+
+    if not search_term:
+        return None
+
+    # 3. Clean search term (remove leading/trailing articles and resource keywords)
+    cleaned = re.sub(
+        r"\b(my|the|this|that|task|todo|to-do|note|reminder|event|meeting)\b",
+        "",
+        search_term,
+        flags=re.I,
+    ).strip()
+
+    # 4. Exact match on search_term
+    doc = await collection.find_one({
+        "user_id": user_id,
+        title_field: {"$regex": f"^{re.escape(search_term)}$", "$options": "i"},
+    })
+    if doc:
+        return doc
+
+    # 5. Exact match on cleaned term
+    if cleaned and cleaned != search_term:
+        doc = await collection.find_one({
+            "user_id": user_id,
+            title_field: {"$regex": f"^{re.escape(cleaned)}$", "$options": "i"},
+        })
+        if doc:
+            return doc
+
+    # 6. Partial match on search_term
+    doc = await collection.find_one({
+        "user_id": user_id,
+        title_field: {"$regex": re.escape(search_term), "$options": "i"},
+    })
+    if doc:
+        return doc
+
+    # 7. Partial match on cleaned term
+    if cleaned and cleaned != search_term:
+        doc = await collection.find_one({
+            "user_id": user_id,
+            title_field: {"$regex": re.escape(cleaned), "$options": "i"},
+        })
+        if doc:
+            return doc
+
+    return None
 
 
 # ============================================================================
@@ -496,11 +645,32 @@ async def _create_task(db: AsyncIOMotorDatabase, user_id: str, args: dict[str, A
     if not title:
         return {"error": "Task title is required."}
 
+    now = datetime.now(timezone.utc)
+
+    # Duplicate prevention: if identical task was created within the last 15 seconds, return it
+    recent_dup = await db.tasks.find_one({
+        "user_id": user_id,
+        "title": {"$regex": f"^{re.escape(title)}$", "$options": "i"},
+        "created_at": {"$gte": now - timedelta(seconds=15)},
+    })
+    if recent_dup:
+        return {
+            "status": "success",
+            "message": f"Task '{title}' already created.",
+            "task": {
+                "id": str(recent_dup["_id"]),
+                "title": recent_dup["title"],
+                "description": recent_dup.get("description", ""),
+                "due_date": _format_datetime(recent_dup.get("due_date")),
+                "priority": recent_dup.get("priority", "medium"),
+                "status": recent_dup.get("status", "todo"),
+            },
+        }
+
     description = args.get("description", "")
     priority = args.get("priority", "medium")
     status_val = args.get("status", "todo")
     due_date = _parse_iso_datetime(args.get("due_date"))
-    now = datetime.now(timezone.utc)
 
     doc = {
         "user_id": user_id,
@@ -531,6 +701,7 @@ async def _create_task(db: AsyncIOMotorDatabase, user_id: str, args: dict[str, A
         return {"error": "Failed to create task in database."}
 
 
+
 async def _view_tasks(db: AsyncIOMotorDatabase, user_id: str, args: dict[str, Any]) -> dict[str, Any]:
     query: dict = {"user_id": user_id}
     status_val = args.get("status")
@@ -559,12 +730,18 @@ async def _view_tasks(db: AsyncIOMotorDatabase, user_id: str, args: dict[str, An
 
 async def _update_task(db: AsyncIOMotorDatabase, user_id: str, args: dict[str, Any]) -> dict[str, Any]:
     task_id = args.get("task_id")
-    if not task_id or not ObjectId.is_valid(task_id):
-        return {"error": "Invalid or missing task_id format."}
+    title_search = args.get("title")
+
+    task = await _resolve_item(db.tasks, user_id, task_id, title_search)
+    if not task:
+        return {"error": "Task not found. Please specify the title or ID of the task to update."}
 
     update_fields: dict[str, Any] = {}
-    if "title" in args and args["title"]:
-        update_fields["title"] = args["title"].strip()
+    if "new_title" in args and args["new_title"]:
+        update_fields["title"] = args["new_title"].strip()
+    elif "title" in args and args["title"] and not task_id:
+        # title was passed as lookup, but if new_title not given and title differs
+        pass
     if "description" in args and args["description"] is not None:
         update_fields["description"] = args["description"]
     if "priority" in args and args["priority"]:
@@ -581,7 +758,7 @@ async def _update_task(db: AsyncIOMotorDatabase, user_id: str, args: dict[str, A
 
     try:
         result = await db.tasks.find_one_and_update(
-            {"_id": ObjectId(task_id), "user_id": user_id},
+            {"_id": task["_id"], "user_id": user_id},
             {"$set": update_fields},
             return_document=True,
         )
@@ -589,7 +766,7 @@ async def _update_task(db: AsyncIOMotorDatabase, user_id: str, args: dict[str, A
             return {"error": "Task not found."}
         return {
             "status": "success",
-            "message": "Task updated successfully.",
+            "message": f"Task '{result.get('title')}' updated successfully.",
             "task": {
                 "id": str(result["_id"]),
                 "title": result.get("title"),
@@ -606,14 +783,20 @@ async def _update_task(db: AsyncIOMotorDatabase, user_id: str, args: dict[str, A
 
 async def _delete_task(db: AsyncIOMotorDatabase, user_id: str, args: dict[str, Any]) -> dict[str, Any]:
     task_id = args.get("task_id")
-    if not task_id or not ObjectId.is_valid(task_id):
-        return {"error": "Invalid or missing task_id format."}
+    title = args.get("title")
+
+    task = await _resolve_item(db.tasks, user_id, task_id, title)
+    if not task:
+        return {"error": "Task not found. Please specify the title or ID of the task to delete."}
 
     try:
-        result = await db.tasks.delete_one({"_id": ObjectId(task_id), "user_id": user_id})
+        result = await db.tasks.delete_one({"_id": task["_id"], "user_id": user_id})
         if result.deleted_count == 0:
             return {"error": "Task not found."}
-        return {"status": "success", "message": f"Task {task_id} deleted successfully."}
+        return {
+            "status": "success",
+            "message": f"Task '{task.get('title', '')}' deleted successfully.",
+        }
     except (PyMongoError, BSONError) as exc:
         logger.error("Error in delete_task tool: %s", exc)
         return {"error": "Failed to delete task from database."}
@@ -627,8 +810,27 @@ async def _create_note(db: AsyncIOMotorDatabase, user_id: str, args: dict[str, A
     if not title or not content:
         return {"error": "Both title and content are required to create a note."}
 
-    tags = args.get("tags", [])
     now = datetime.now(timezone.utc)
+
+    # Duplicate prevention: if identical note was created within the last 15 seconds, return it
+    recent_dup = await db.notes.find_one({
+        "user_id": user_id,
+        "title": {"$regex": f"^{re.escape(title)}$", "$options": "i"},
+        "created_at": {"$gte": now - timedelta(seconds=15)},
+    })
+    if recent_dup:
+        return {
+            "status": "success",
+            "message": f"Note '{title}' already created.",
+            "note": {
+                "id": str(recent_dup["_id"]),
+                "title": recent_dup["title"],
+                "content": recent_dup.get("content", ""),
+                "tags": recent_dup.get("tags", []),
+            },
+        }
+
+    tags = args.get("tags", [])
     doc = {
         "user_id": user_id,
         "title": title,
@@ -675,12 +877,15 @@ async def _view_notes(db: AsyncIOMotorDatabase, user_id: str, args: dict[str, An
 
 async def _update_note(db: AsyncIOMotorDatabase, user_id: str, args: dict[str, Any]) -> dict[str, Any]:
     note_id = args.get("note_id")
-    if not note_id or not ObjectId.is_valid(note_id):
-        return {"error": "Invalid or missing note_id format."}
+    title_search = args.get("title")
+
+    note = await _resolve_item(db.notes, user_id, note_id, title_search)
+    if not note:
+        return {"error": "Note not found. Please specify the title or ID of the note to update."}
 
     update_fields: dict[str, Any] = {}
-    if "title" in args and args["title"]:
-        update_fields["title"] = args["title"].strip()
+    if "new_title" in args and args["new_title"]:
+        update_fields["title"] = args["new_title"].strip()
     if "content" in args and args["content"]:
         update_fields["content"] = args["content"].strip()
     if "tags" in args and isinstance(args["tags"], list):
@@ -693,7 +898,7 @@ async def _update_note(db: AsyncIOMotorDatabase, user_id: str, args: dict[str, A
 
     try:
         result = await db.notes.find_one_and_update(
-            {"_id": ObjectId(note_id), "user_id": user_id},
+            {"_id": note["_id"], "user_id": user_id},
             {"$set": update_fields},
             return_document=True,
         )
@@ -701,7 +906,7 @@ async def _update_note(db: AsyncIOMotorDatabase, user_id: str, args: dict[str, A
             return {"error": "Note not found."}
         return {
             "status": "success",
-            "message": "Note updated successfully.",
+            "message": f"Note '{result.get('title')}' updated successfully.",
             "note": {
                 "id": str(result["_id"]),
                 "title": result.get("title"),
@@ -716,14 +921,17 @@ async def _update_note(db: AsyncIOMotorDatabase, user_id: str, args: dict[str, A
 
 async def _delete_note(db: AsyncIOMotorDatabase, user_id: str, args: dict[str, Any]) -> dict[str, Any]:
     note_id = args.get("note_id")
-    if not note_id or not ObjectId.is_valid(note_id):
-        return {"error": "Invalid or missing note_id format."}
+    title = args.get("title")
+
+    note = await _resolve_item(db.notes, user_id, note_id, title)
+    if not note:
+        return {"error": "Note not found. Please specify the title or ID of the note to delete."}
 
     try:
-        result = await db.notes.delete_one({"_id": ObjectId(note_id), "user_id": user_id})
+        result = await db.notes.delete_one({"_id": note["_id"], "user_id": user_id})
         if result.deleted_count == 0:
             return {"error": "Note not found."}
-        return {"status": "success", "message": f"Note {note_id} deleted successfully."}
+        return {"status": "success", "message": f"Note '{note.get('title', '')}' deleted successfully."}
     except (PyMongoError, BSONError) as exc:
         logger.error("Error in delete_note tool: %s", exc)
         return {"error": "Failed to delete note from database."}
@@ -736,10 +944,29 @@ async def _create_reminder(db: AsyncIOMotorDatabase, user_id: str, args: dict[st
     due_time_raw = args.get("due_time")
     due_time = _parse_iso_datetime(due_time_raw)
     if not message or not due_time:
-        return {"error": "Both message and valid ISO due_time are required to create a reminder."}
+        return {"error": "Both message and valid due_time are required to create a reminder."}
+
+    now = datetime.now(timezone.utc)
+
+    # Duplicate prevention: if identical reminder was created within the last 15 seconds, return it
+    recent_dup = await db.reminders.find_one({
+        "user_id": user_id,
+        "message": {"$regex": f"^{re.escape(message)}$", "$options": "i"},
+        "created_at": {"$gte": now - timedelta(seconds=15)},
+    })
+    if recent_dup:
+        return {
+            "status": "success",
+            "message": f"Reminder '{message}' already created.",
+            "reminder": {
+                "id": str(recent_dup["_id"]),
+                "message": recent_dup["message"],
+                "due_time": _format_datetime(recent_dup.get("due_time")),
+                "repeat": recent_dup.get("repeat"),
+            },
+        }
 
     repeat = args.get("repeat")
-    now = datetime.now(timezone.utc)
     doc = {
         "user_id": user_id,
         "message": message,
@@ -787,12 +1014,15 @@ async def _view_reminders(db: AsyncIOMotorDatabase, user_id: str, args: dict[str
 
 async def _update_reminder(db: AsyncIOMotorDatabase, user_id: str, args: dict[str, Any]) -> dict[str, Any]:
     reminder_id = args.get("reminder_id")
-    if not reminder_id or not ObjectId.is_valid(reminder_id):
-        return {"error": "Invalid or missing reminder_id format."}
+    msg_search = args.get("message") or args.get("title")
+
+    reminder = await _resolve_item(db.reminders, user_id, reminder_id, msg_search, title_field="message")
+    if not reminder:
+        return {"error": "Reminder not found. Please specify the message or ID of the reminder to update."}
 
     update_fields: dict[str, Any] = {}
-    if "message" in args and args["message"]:
-        update_fields["message"] = args["message"].strip()
+    if "new_message" in args and args["new_message"]:
+        update_fields["message"] = args["new_message"].strip()
     if "due_time" in args and args["due_time"]:
         update_fields["due_time"] = _parse_iso_datetime(args["due_time"])
     if "repeat" in args:
@@ -805,7 +1035,7 @@ async def _update_reminder(db: AsyncIOMotorDatabase, user_id: str, args: dict[st
 
     try:
         result = await db.reminders.find_one_and_update(
-            {"_id": ObjectId(reminder_id), "user_id": user_id},
+            {"_id": reminder["_id"], "user_id": user_id},
             {"$set": update_fields},
             return_document=True,
         )
@@ -813,7 +1043,7 @@ async def _update_reminder(db: AsyncIOMotorDatabase, user_id: str, args: dict[st
             return {"error": "Reminder not found."}
         return {
             "status": "success",
-            "message": "Reminder updated successfully.",
+            "message": f"Reminder '{result.get('message')}' updated successfully.",
             "reminder": {
                 "id": str(result["_id"]),
                 "message": result.get("message"),
@@ -829,14 +1059,17 @@ async def _update_reminder(db: AsyncIOMotorDatabase, user_id: str, args: dict[st
 
 async def _delete_reminder(db: AsyncIOMotorDatabase, user_id: str, args: dict[str, Any]) -> dict[str, Any]:
     reminder_id = args.get("reminder_id")
-    if not reminder_id or not ObjectId.is_valid(reminder_id):
-        return {"error": "Invalid or missing reminder_id format."}
+    message = args.get("message") or args.get("title")
+
+    reminder = await _resolve_item(db.reminders, user_id, reminder_id, message, title_field="message")
+    if not reminder:
+        return {"error": "Reminder not found. Please specify the message or ID of the reminder to delete."}
 
     try:
-        result = await db.reminders.delete_one({"_id": ObjectId(reminder_id), "user_id": user_id})
+        result = await db.reminders.delete_one({"_id": reminder["_id"], "user_id": user_id})
         if result.deleted_count == 0:
             return {"error": "Reminder not found."}
-        return {"status": "success", "message": f"Reminder {reminder_id} deleted successfully."}
+        return {"status": "success", "message": f"Reminder '{reminder.get('message', '')}' deleted successfully."}
     except (PyMongoError, BSONError) as exc:
         logger.error("Error in delete_reminder tool: %s", exc)
         return {"error": "Failed to delete reminder from database."}
@@ -875,13 +1108,38 @@ async def _view_calendar_events(db: AsyncIOMotorDatabase, user_id: str, args: di
 async def _create_calendar_event(db: AsyncIOMotorDatabase, user_id: str, args: dict[str, Any]) -> dict[str, Any]:
     title = args.get("title", "").strip()
     start_time = _parse_iso_datetime(args.get("start_time"))
+    if not title or not start_time:
+        return {"error": "Title and valid start_time are required for calendar event."}
+
+    # Default end_time to 1 hour after start_time if not explicitly provided
     end_time = _parse_iso_datetime(args.get("end_time"))
-    if not title or not start_time or not end_time:
-        return {"error": "Title, valid start_time, and valid end_time are required for calendar event."}
+    if not end_time:
+        end_time = start_time + timedelta(hours=1)
+
+    now = datetime.now(timezone.utc)
+
+    # Duplicate prevention: if identical event was scheduled within the last 15 seconds, return it
+    recent_dup = await db.calendar_events.find_one({
+        "user_id": user_id,
+        "title": {"$regex": f"^{re.escape(title)}$", "$options": "i"},
+        "created_at": {"$gte": now - timedelta(seconds=15)},
+    })
+    if recent_dup:
+        return {
+            "status": "success",
+            "message": f"Calendar event '{title}' already scheduled.",
+            "event": {
+                "id": str(recent_dup["_id"]),
+                "title": recent_dup["title"],
+                "description": recent_dup.get("description", ""),
+                "start_time": _format_datetime(recent_dup.get("start_time")),
+                "end_time": _format_datetime(recent_dup.get("end_time")),
+                "color": recent_dup.get("color", "#4f46e5"),
+            },
+        }
 
     description = args.get("description", "")
     color = args.get("color", "#4f46e5")
-    now = datetime.now(timezone.utc)
 
     doc = {
         "user_id": user_id,
@@ -896,7 +1154,7 @@ async def _create_calendar_event(db: AsyncIOMotorDatabase, user_id: str, args: d
         result = await db.calendar_events.insert_one(doc)
         return {
             "status": "success",
-            "message": f"Calendar event '{title}' scheduled.",
+            "message": f"Calendar event '{title}' scheduled for {_format_datetime(start_time)}.",
             "event": {
                 "id": str(result.inserted_id),
                 "title": title,
@@ -909,6 +1167,76 @@ async def _create_calendar_event(db: AsyncIOMotorDatabase, user_id: str, args: d
     except PyMongoError as exc:
         logger.error("Error in create_calendar_event tool: %s", exc)
         return {"error": "Failed to create calendar event in database."}
+
+
+async def _update_calendar_event(db: AsyncIOMotorDatabase, user_id: str, args: dict[str, Any]) -> dict[str, Any]:
+    event_id = args.get("event_id")
+    title_search = args.get("title")
+
+    event = await _resolve_item(db.calendar_events, user_id, event_id, title_search)
+    if not event:
+        return {"error": "Calendar event not found. Please specify the title or ID of the event to update."}
+
+    update_fields: dict[str, Any] = {}
+    if "new_title" in args and args["new_title"]:
+        update_fields["title"] = args["new_title"].strip()
+    if "description" in args and args["description"] is not None:
+        update_fields["description"] = args["description"]
+    if "start_time" in args and args["start_time"]:
+        update_fields["start_time"] = _parse_iso_datetime(args["start_time"])
+    if "end_time" in args and args["end_time"]:
+        update_fields["end_time"] = _parse_iso_datetime(args["end_time"])
+    if "color" in args and args["color"]:
+        update_fields["color"] = args["color"]
+
+    if not update_fields:
+        return {"error": "No valid fields specified for update."}
+
+    try:
+        result = await db.calendar_events.find_one_and_update(
+            {"_id": event["_id"], "user_id": user_id},
+            {"$set": update_fields},
+            return_document=True,
+        )
+        if not result:
+            return {"error": "Calendar event not found."}
+        return {
+            "status": "success",
+            "message": f"Calendar event '{result.get('title')}' updated successfully.",
+            "event": {
+                "id": str(result["_id"]),
+                "title": result.get("title"),
+                "description": result.get("description"),
+                "start_time": _format_datetime(result.get("start_time")),
+                "end_time": _format_datetime(result.get("end_time")),
+                "color": result.get("color"),
+            },
+        }
+    except (PyMongoError, BSONError) as exc:
+        logger.error("Error in update_calendar_event tool: %s", exc)
+        return {"error": "Failed to update calendar event in database."}
+
+
+async def _delete_calendar_event(db: AsyncIOMotorDatabase, user_id: str, args: dict[str, Any]) -> dict[str, Any]:
+    event_id = args.get("event_id")
+    title = args.get("title")
+
+    event = await _resolve_item(db.calendar_events, user_id, event_id, title)
+    if not event:
+        return {"error": "Calendar event not found. Please specify the title or ID of the event to delete."}
+
+    try:
+        result = await db.calendar_events.delete_one({"_id": event["_id"], "user_id": user_id})
+        if result.deleted_count == 0:
+            return {"error": "Calendar event not found."}
+        return {
+            "status": "success",
+            "message": f"Calendar event '{event.get('title', '')}' deleted successfully.",
+        }
+    except (PyMongoError, BSONError) as exc:
+        logger.error("Error in delete_calendar_event tool: %s", exc)
+        return {"error": "Failed to delete calendar event from database."}
+
 
 
 # --- Weather Handler ---
@@ -1034,6 +1362,10 @@ async def execute_agent_tool(
         return await _view_calendar_events(db, user_id, arguments)
     elif tool_name == "create_calendar_event":
         return await _create_calendar_event(db, user_id, arguments)
+    elif tool_name == "update_calendar_event":
+        return await _update_calendar_event(db, user_id, arguments)
+    elif tool_name == "delete_calendar_event":
+        return await _delete_calendar_event(db, user_id, arguments)
 
     # Weather
     elif tool_name == "get_weather":

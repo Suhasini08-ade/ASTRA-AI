@@ -46,26 +46,27 @@ class PlanningEngineTests(unittest.TestCase):
         self.assertEqual(plan.steps[0].depends_on, [])
         self.assertFalse(plan.confirmation_required)
 
-    def test_confirmation_requirement_is_preserved(self):
+    def test_delete_plan_is_ready_and_directly_executable(self):
+        """DELETE actions no longer require confirmation — plans are READY immediately."""
         plan = self.plan(
             Decision(
                 category=DecisionCategory.DELETE,
-                confirmation_required=True,
+                confirmation_required=False,
                 actions=[
                     DecisionAction(
                         action_name="delete_task",
                         resource_type="task",
                         operation=DecisionOperation.DELETE,
                         supported=True,
-                        confirmation_required=True,
+                        confirmation_required=False,
                     )
                 ],
             )
         )
 
-        self.assertEqual(plan.status, PlanStatus.REQUIRES_CONFIRMATION)
-        self.assertTrue(plan.confirmation_required)
-        self.assertTrue(plan.steps[0].confirmation_required)
+        self.assertEqual(plan.status, PlanStatus.READY)
+        self.assertFalse(plan.confirmation_required)
+        self.assertFalse(plan.steps[0].confirmation_required)
 
     def test_clarification_decision_never_creates_steps(self):
         plan = self.plan(
@@ -83,15 +84,15 @@ class PlanningEngineTests(unittest.TestCase):
     def test_unsupported_action_never_enters_a_plan(self):
         plan = self.plan(
             Decision(
-                category=DecisionCategory.DELETE,
+                category=DecisionCategory.READ,
                 supported=False,
                 actions=[
                     DecisionAction(
                         action_name=None,
-                        resource_type="calendar_event",
-                        operation=DecisionOperation.DELETE,
+                        resource_type="task",
+                        operation=DecisionOperation.READ,
                         supported=False,
-                        confirmation_required=True,
+                        confirmation_required=False,
                     )
                 ],
             )

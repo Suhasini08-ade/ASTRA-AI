@@ -45,14 +45,15 @@ class DecisionEngineTests(unittest.TestCase):
         decision = self.decide("Move my DAA task to Friday")
         self.assertEqual(decision.category, DecisionCategory.UPDATE)
         self.assertEqual(decision.actions[0].action_name, "update_task")
-        self.assertTrue(decision.confirmation_required)
+        # Confirmation is now handled by agent tools (title/ID resolution).
+        self.assertFalse(decision.confirmation_required)
 
-    def test_delete_task_requires_confirmation(self):
+    def test_delete_task_does_not_require_decision_layer_confirmation(self):
         decision = self.decide("Delete my old task")
         self.assertEqual(decision.category, DecisionCategory.DELETE)
         self.assertEqual(decision.actions[0].action_name, "delete_task")
-        self.assertTrue(decision.confirmation_required)
-        self.assertTrue(decision.actions[0].confirmation_required)
+        self.assertFalse(decision.confirmation_required)
+        self.assertFalse(decision.actions[0].confirmation_required)
 
     def test_multi_action_request_detects_each_existing_tool(self):
         decision = self.decide("Create a task to study DAA and remind me tomorrow")
@@ -71,12 +72,12 @@ class DecisionEngineTests(unittest.TestCase):
         self.assertTrue(decision.requires_clarification)
         self.assertEqual(decision.actions, [])
 
-    def test_unsupported_calendar_delete_is_not_invented(self):
+    def test_calendar_delete_is_now_supported(self):
         decision = self.decide("Delete my calendar event")
         self.assertEqual(decision.category, DecisionCategory.DELETE)
-        self.assertFalse(decision.supported)
-        self.assertIsNone(decision.actions[0].action_name)
-        self.assertTrue(decision.confirmation_required)
+        self.assertTrue(decision.supported)
+        self.assertEqual(decision.actions[0].action_name, "delete_calendar_event")
+        self.assertFalse(decision.confirmation_required)
 
     def test_weather_request(self):
         decision = self.decide("What is the weather in Latur?")
@@ -111,7 +112,7 @@ class DecisionEngineTests(unittest.TestCase):
         )
         self.assertEqual(decision.category, DecisionCategory.DELETE)
         self.assertEqual(decision.actions[0].action_name, "delete_task")
-        self.assertTrue(decision.confirmation_required)
+        self.assertFalse(decision.confirmation_required)
 
     def test_phase_one_context_is_accepted_without_changing_behavior(self):
         context = IntelligenceContext(

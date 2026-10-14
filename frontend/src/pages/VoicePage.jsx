@@ -8,7 +8,7 @@ export default function VoicePage() {
   const [isListening, setIsListening] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [pendingDestructiveCommand, setPendingDestructiveCommand] = useState(null);
+  const isProcessingRef = useRef(false); // ref-mirror to prevent duplicate submissions
   const recognitionRef = useRef(null);
 
   const [transcript, setTranscript] = useState([]);
@@ -23,10 +23,16 @@ export default function VoicePage() {
       recognition.lang = 'en-US';
 
       recognition.onresult = (event) => {
-        const lastResult = event.results[event.results.length - 1];
-        if (lastResult.isFinal) {
-          const userSpeech = lastResult[0].transcript;
-          handleUserVoiceInput(userSpeech);
+        // Accumulate ALL final transcript segments so multi-result sessions
+        // capture the full spoken command (e.g. "Delete my Java study task").
+        let finalTranscript = '';
+        for (let i = 0; i < event.results.length; i++) {
+          if (event.results[i].isFinal) {
+            finalTranscript += event.results[i][0].transcript;
+          }
+        }
+        if (finalTranscript.trim()) {
+          handleUserVoiceInput(finalTranscript.trim());
         }
       };
 
@@ -62,6 +68,7 @@ export default function VoicePage() {
   };
 
   const sendVoiceCommand = async (inputText) => {
+    isProcessingRef.current = true;
     setIsProcessing(true);
     try {
       const res = await apiSendVoiceCommand(inputText);
@@ -75,45 +82,21 @@ export default function VoicePage() {
       setTranscript((prev) => [...prev, { id: Date.now() + 1, speaker: 'Astra Voice', text: errorReply }]);
       speakText(errorReply);
     } finally {
+      isProcessingRef.current = false;
       setIsProcessing(false);
     }
   };
 
   const handleUserVoiceInput = async (inputText) => {
     if (!inputText || !inputText.trim()) return;
+    // Prevent duplicate submissions while a previous command is still processing.
+    if (isProcessingRef.current) return;
 
     setTranscript((prev) => [
       ...prev,
       { id: Date.now(), speaker: 'You', text: inputText },
     ]);
 
-    if (pendingDestructiveCommand) {
-      if (/\b(?:yes|confirm|do it|delete it|go ahead)\b/i.test(inputText)) {
-        const command = pendingDestructiveCommand;
-        setPendingDestructiveCommand(null);
-        await sendVoiceCommand(command);
-        return;
-      }
-      if (/\b(?:no|cancel|stop|don't)\b/i.test(inputText)) {
-        setPendingDestructiveCommand(null);
-        const reply = 'Okay, I will not delete that task.';
-        setTranscript((prev) => [...prev, { id: Date.now() + 1, speaker: 'Astra Voice', text: reply }]);
-        speakText(reply);
-        return;
-      }
-      const reply = 'Please say yes to confirm deletion or no to cancel.';
-      setTranscript((prev) => [...prev, { id: Date.now() + 1, speaker: 'Astra Voice', text: reply }]);
-      speakText(reply);
-      return;
-    }
-
-    if (/\b(?:delete|remove|erase)\b.*\b(?:task|todo)\b/i.test(inputText)) {
-      setPendingDestructiveCommand(inputText);
-      const reply = 'This will permanently delete a task. Say yes to confirm or no to cancel.';
-      setTranscript((prev) => [...prev, { id: Date.now() + 1, speaker: 'Astra Voice', text: reply }]);
-      speakText(reply);
-      return;
-    }
     await sendVoiceCommand(inputText);
   };
 

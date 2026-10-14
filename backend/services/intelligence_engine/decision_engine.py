@@ -55,6 +55,8 @@ class DecisionEngine:
         ("reminder", DecisionOperation.DELETE): "delete_reminder",
         ("calendar_event", DecisionOperation.READ): "view_calendar_events",
         ("calendar_event", DecisionOperation.CREATE): "create_calendar_event",
+        ("calendar_event", DecisionOperation.UPDATE): "update_calendar_event",
+        ("calendar_event", DecisionOperation.DELETE): "delete_calendar_event",
         ("weather", DecisionOperation.READ): "get_weather",
         ("news", DecisionOperation.READ): "get_news",
         ("document", DecisionOperation.ANALYZE): "summarize_document",
@@ -196,7 +198,12 @@ class DecisionEngine:
     def _action_for(self, resource: str, operation: DecisionOperation) -> DecisionAction:
         action_name = self._TOOL_MAP.get((resource, operation))
         supported = action_name in AVAILABLE_TOOL_NAMES if action_name else False
-        confirmation_required = operation in {DecisionOperation.UPDATE, DecisionOperation.DELETE}
+        # Confirmation is never required at the decision layer.
+        # The agent tools resolve items by title/ID before executing, so if the
+        # item cannot be found they return an error rather than acting blindly.
+        # Removing this gate lets voice and chat DELETE/UPDATE commands execute
+        # immediately without a separate confirmation round-trip.
+        confirmation_required = False
         return DecisionAction(
             action_name=action_name if supported else None,
             resource_type=resource,

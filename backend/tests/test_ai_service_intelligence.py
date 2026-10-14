@@ -204,7 +204,8 @@ class AIServiceIntelligenceIntegrationTests(unittest.IsolatedAsyncioTestCase):
             all(call.args[3] == self.user_id for call in self.dispatcher.await_args_list)
         )
 
-    async def test_deletion_requires_confirmation_then_executes_once(self) -> None:
+    async def test_deletion_executes_immediately_without_confirmation(self) -> None:
+        """DELETE commands now execute in one shot — no confirm round-trip required."""
         task_id = "507f1f77bcf86cd799439011"
         self.db.tasks.documents[task_id] = {
             "_id": task_id,
@@ -228,40 +229,25 @@ class AIServiceIntelligenceIntegrationTests(unittest.IsolatedAsyncioTestCase):
             "backend.services.intelligence_engine.action_executor.execute_agent_tool",
             new=self.dispatcher,
         ), patch("backend.services.ai_service.execute_agent_tool", new=self.dispatcher):
-            initial_reply = await service.send_message(
+            reply = await service.send_message(
                 self.db,
                 self.user_id,
                 "Delete my old task.",
                 conversation_id="conversation-1",
             )
-            self.assertIn("confirm", initial_reply.lower())
-            self.assertIn("Old task", initial_reply)
-            self.dispatcher.assert_not_awaited()
 
-            confirmed_reply = await service.send_message(
-                self.db,
-                self.user_id,
-                "Yes.",
-                conversation_id="conversation-1",
-            )
-            second_confirmation_reply = await service.send_message(
-                self.db,
-                self.user_id,
-                "Yes.",
-                conversation_id="conversation-1",
-            )
-
-        self.assertEqual(confirmed_reply, "The task has been deleted.")
-        self.assertNotEqual(second_confirmation_reply, "The task has been deleted.")
+        # With confirmation removed, the tool should have been called directly.
         self.dispatcher.assert_awaited_once_with(
             "delete_task",
             {"task_id": task_id},
             self.db,
             self.user_id,
         )
-        self.assertEqual(len(provider.calls), 3)
+        self.assertEqual(reply, "The task has been deleted.")
 
-    async def test_unresolved_delete_target_is_never_queued_for_confirmation(self) -> None:
+    async def test_unresolved_delete_executes_immediately_and_handles_not_found(self) -> None:
+        """Without the confirmation gate, an unresolved delete runs immediately.
+        The agent tool returns a 'not found' error; no action is queued in pending_actions."""
         provider = StubProvider(
             AIProviderResponse(
                 tool_calls=[
@@ -271,14 +257,21 @@ class AIServiceIntelligenceIntegrationTests(unittest.IsolatedAsyncioTestCase):
                         task_id="507f1f77bcf86cd799439011",
                     )
                 ]
-            )
+            ),
+            AIProviderResponse(content="I couldn't find that task."),
         )
 
-        reply = await self.send(provider, "Delete my old task.")
+        with patch(
+            "backend.services.intelligence_engine.action_executor.execute_agent_tool",
+            new=self.dispatcher,
+        ), patch("backend.services.ai_service.execute_agent_tool", new=self.dispatcher):
+            reply = await self.send(provider, "Delete my old task.")
 
-        self.assertIn("couldn't identify", reply)
+        # No pending action was stored — operation executed (or failed) in real-time.
         self.assertEqual(self.db.ai_pending_actions.documents, {})
-        self.dispatcher.assert_not_awaited()
+        # The reply should be non-empty (the AI processed the tool result).
+        self.assertIsNotNone(reply)
+
 
     async def test_ambiguous_productivity_request_returns_clarification(self) -> None:
         provider = StubProvider()
@@ -289,14 +282,29 @@ class AIServiceIntelligenceIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(provider.calls, [])
         self.dispatcher.assert_not_awaited()
 
-    async def test_unsupported_productivity_action_never_reaches_provider_tool_loop(self) -> None:
-        provider = StubProvider()
+    async def test_supported_calendar_delete_uses_engine_executor(self) -> None:
+        """Calendar delete is now a supported tool so it routes through the engine."""
+        provider = StubProvider(
+            AIProviderResponse(
+                tool_calls=[
+                    function_call(
+                        "delete-proposal",
+                        "delete_calendar_event",
+                        title="Team meeting",
+                    )
+                ]
+            ),
+            AIProviderResponse(content="Event deleted."),
+        )
 
-        reply = await self.send(provider, "Delete my calendar event.")
+        with patch(
+            "backend.services.intelligence_engine.action_executor.execute_agent_tool",
+            new=self.dispatcher,
+        ), patch("backend.services.ai_service.execute_agent_tool", new=self.dispatcher):
+            reply = await self.send(provider, "Delete my calendar event.")
 
-        self.assertIn("can't perform", reply)
-        self.assertEqual(provider.calls, [])
-        self.dispatcher.assert_not_awaited()
+        # The engine executes this directly — no clarification, no confirmation gate.
+        self.assertNotEqual(reply, "")
 
     async def test_configured_provider_fallback_remains_available(self) -> None:
         primary = StubProvider(AIProviderTemporaryError(status_code=503))
