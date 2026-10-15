@@ -18,7 +18,10 @@ from bson.errors import BSONError
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from pymongo.errors import PyMongoError
 
+import urllib.parse
+
 from backend.config import get_settings
+from backend.services.desktop import desktop_service
 from backend.services.knowledge_service import knowledge_service
 from backend.services.news_service import news_service
 from backend.services.weather_service import weather_service
@@ -506,6 +509,211 @@ AGENT_TOOLS = [
                     },
                 },
                 "required": ["text"],
+            },
+        },
+    },
+
+    # --- DESKTOP AUTOMATION ---
+    {
+        "type": "function",
+        "function": {
+            "name": "open_desktop_app",
+            "description": (
+                "Open an approved desktop application installed on the user's Windows computer "
+                "(e.g., 'chrome', 'vscode', 'calculator', 'notepad', 'explorer', 'paint', 'spotify'). "
+                "Only approved applications can be opened. Never pass arbitrary shell commands or executable paths."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "app_name": {
+                        "type": "string",
+                        "description": (
+                            "Name or alias of the approved application to launch (e.g., 'chrome', 'vscode', "
+                            "'calculator', 'notepad', 'explorer', 'terminal', 'cmd', 'powershell', 'paint', "
+                            "'task_manager', 'snipping_tool', 'word', 'excel', 'powerpoint', 'spotify', 'vlc')."
+                        ),
+                    },
+                    "confirmed": {
+                        "type": "boolean",
+                        "description": "True only if the user explicitly confirmed launching a sensitive tool (such as command prompt or powershell).",
+                    },
+                },
+                "required": ["app_name"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "open_website",
+            "description": (
+                "Open a validated HTTP or HTTPS website in the user's default web browser "
+                "(e.g., 'https://youtube.com', 'https://github.com', or 'google.com')."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "The website address or domain to open (e.g. 'https://youtube.com', 'github.com').",
+                    },
+                },
+                "required": ["url"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_web_browser",
+            "description": (
+                "Search the web for a query using the user's default web browser. "
+                "Opens Google Search with the search query in the browser."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The search terms to look up on the web (e.g. 'Python tutorials', 'fastapi docs').",
+                    },
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "open_folder",
+            "description": (
+                "Open an approved folder or directory in Windows File Explorer "
+                "(e.g. 'Downloads', 'Documents', 'Desktop', 'Pictures', or a valid project folder path)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "folder_name": {
+                        "type": "string",
+                        "description": "The name or path of the folder to open (e.g. 'Downloads', 'Documents', 'Desktop').",
+                    },
+                },
+                "required": ["folder_name"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "take_screenshot",
+            "description": (
+                "Take a screenshot of the user's desktop screen and save it to a designated, user-accessible folder "
+                "(default is Pictures/Screenshots)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "folder": {
+                        "type": "string",
+                        "description": "Optional folder alias or path (e.g. 'Pictures/Screenshots', 'Desktop', 'Downloads').",
+                    },
+                    "filename": {
+                        "type": "string",
+                        "description": "Optional custom filename for the screenshot (e.g. 'preview.png').",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_files",
+            "description": (
+                "Search for files by name or pattern inside an explicitly selected, permitted user folder "
+                "(e.g. 'Documents', 'Downloads', 'Desktop', 'Pictures'). "
+                "Whole-drive searches (like C:\\) are prohibited. Returns matching filenames and metadata without reading private file contents."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The file name, partial name, or search pattern (e.g. 'invoice', 'report.pdf', '*.docx').",
+                    },
+                    "folder": {
+                        "type": "string",
+                        "description": "The specific permitted folder to search inside (e.g. 'Documents', 'Downloads', 'Desktop', 'Pictures').",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of search results to return (default 20, max 50).",
+                    },
+                },
+                "required": ["query", "folder"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "open_file",
+            "description": (
+                "Open a validated file with its default Windows application (e.g. opening a document, spreadsheet, PDF, or image). "
+                "Executable or script files (.exe, .bat, .cmd, .ps1, etc.) require explicit user confirmation before opening."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {
+                        "type": "string",
+                        "description": "Path to the file to open (e.g. 'C:\\Users\\Username\\Documents\\report.pdf').",
+                    },
+                    "confirmed": {
+                        "type": "boolean",
+                        "description": "True only if the user explicitly confirmed opening a sensitive executable or script file.",
+                    },
+                },
+                "required": ["file_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_current_datetime",
+            "description": "Report the user's current local date, time, day of the week, and timezone.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "control_volume",
+            "description": (
+                "Safely adjust Windows system volume or toggle mute. "
+                "Actions: 'up' (increase volume), 'down' (decrease volume), 'mute' (toggle mute/unmute)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["up", "down", "mute", "unmute"],
+                        "description": "Volume action to perform.",
+                    },
+                    "steps": {
+                        "type": "integer",
+                        "description": "Number of step increments (1 to 10, default 2).",
+                    },
+                },
+                "required": ["action"],
             },
         },
     },
@@ -1306,6 +1514,264 @@ async def _summarize_document(args: dict[str, Any]) -> dict[str, Any]:
     return {"status": "success", "file_name": file_name, "summary": summary_data}
 
 
+# --- Desktop Automation Handlers ---
+
+async def _open_desktop_app(arguments: dict[str, Any]) -> dict[str, Any]:
+    raw_app = str(arguments.get("app_name", "")).strip()
+    if not raw_app:
+        return {"status": "error", "error": "Application name is required."}
+
+    # Redirect web domains or URLs if inadvertently routed as app names
+    lowered = raw_app.lower()
+    if lowered in ("youtube", "github", "google", "gmail", "reddit", "twitter", "linkedin") or "://" in raw_app:
+        return await _open_website({"url": raw_app})
+
+    # Sensitive command-line tools require confirmation
+    confirmed = bool(arguments.get("confirmed", False))
+    if lowered in ("cmd", "command prompt", "powershell", "windows powershell"):
+        if not confirmed:
+            return {
+                "status": "requires_confirmation",
+                "action": "open_desktop_app",
+                "app_name": raw_app,
+                "message": (
+                    f"Launching {raw_app} provides command-line terminal access to your computer. "
+                    "Please confirm if you wish to proceed."
+                ),
+            }
+
+    result = desktop_service.open_app(raw_app)
+    if result.get("success"):
+        return {
+            "status": "success",
+            "action": "open_desktop_app",
+            "target": result.get("target"),
+            "resolved_path": result.get("resolved_path"),
+            "message": result.get("message"),
+        }
+    return {
+        "status": "error",
+        "action": "open_desktop_app",
+        "target": result.get("target", raw_app),
+        "error": result.get("error"),
+        "message": result.get("message"),
+    }
+
+
+async def _open_website(arguments: dict[str, Any]) -> dict[str, Any]:
+    raw_url = str(arguments.get("url", "")).strip()
+    if not raw_url:
+        return {"status": "error", "error": "Website URL is required."}
+
+    result = desktop_service.open_website(raw_url)
+    if result.get("success"):
+        return {
+            "status": "success",
+            "action": "open_website",
+            "target": result.get("target"),
+            "message": result.get("message"),
+        }
+    return {
+        "status": "error",
+        "action": "open_website",
+        "target": result.get("target", raw_url),
+        "error": result.get("error"),
+        "message": result.get("message"),
+    }
+
+
+async def _search_web_browser(arguments: dict[str, Any]) -> dict[str, Any]:
+    raw_query = str(arguments.get("query", "")).strip()
+    if not raw_query:
+        return {"status": "error", "error": "Search query is required."}
+
+    encoded = urllib.parse.quote_plus(raw_query)
+    search_url = f"https://www.google.com/search?q={encoded}"
+    result = desktop_service.open_website(search_url)
+    if result.get("success"):
+        return {
+            "status": "success",
+            "action": "search_web_browser",
+            "query": raw_query,
+            "url": search_url,
+            "message": f"Successfully searched the web for '{raw_query}'.",
+        }
+    return {
+        "status": "error",
+        "action": "search_web_browser",
+        "query": raw_query,
+        "error": result.get("error"),
+        "message": result.get("message"),
+    }
+
+
+async def _open_folder(arguments: dict[str, Any]) -> dict[str, Any]:
+    raw_folder = str(arguments.get("folder_name", "")).strip()
+    if not raw_folder:
+        return {"status": "error", "error": "Folder name or path is required."}
+
+    result = desktop_service.open_folder(raw_folder)
+    if result.get("success"):
+        return {
+            "status": "success",
+            "action": "open_folder",
+            "target": result.get("target"),
+            "path": result.get("resolved_path"),
+            "message": result.get("message"),
+        }
+    return {
+        "status": "error",
+        "action": "open_folder",
+        "target": result.get("target", raw_folder),
+        "error": result.get("error"),
+        "message": result.get("message"),
+    }
+
+
+async def _take_screenshot(arguments: dict[str, Any]) -> dict[str, Any]:
+    folder = arguments.get("folder")
+    filename = arguments.get("filename")
+    result = desktop_service.take_screenshot(folder=folder, filename=filename)
+    if result.get("success"):
+        return {
+            "status": "success",
+            "action": "take_screenshot",
+            "file_name": result.get("details", {}).get("file_name"),
+            "folder": result.get("details", {}).get("folder"),
+            "full_path": result.get("resolved_path"),
+            "message": result.get("message"),
+        }
+    return {
+        "status": "error",
+        "action": "take_screenshot",
+        "error": result.get("error"),
+        "message": result.get("message"),
+    }
+
+
+async def _search_files(arguments: dict[str, Any]) -> dict[str, Any]:
+    query = str(arguments.get("query", "")).strip()
+    folder = str(arguments.get("folder", "")).strip()
+    limit = int(arguments.get("limit", 20))
+
+    if not query:
+        return {
+            "status": "error",
+            "action": "search_files",
+            "message": "Filename or search query is required. Please specify what file to search for.",
+            "error": "Missing query.",
+        }
+
+    if not folder:
+        return {
+            "status": "needs_clarification",
+            "action": "search_files",
+            "message": "Please specify which permitted folder to search (e.g. Documents, Downloads, Desktop, Pictures).",
+            "error": "Missing search folder.",
+        }
+
+    result = desktop_service.search_files(query=query, folder=folder, limit=limit)
+    if result.get("success"):
+        return {
+            "status": "success",
+            "action": "search_files",
+            "query": query,
+            "folder": result.get("resolved_path"),
+            "count": result.get("details", {}).get("count", 0),
+            "files": result.get("details", {}).get("files", []),
+            "message": result.get("message"),
+        }
+    return {
+        "status": "error",
+        "action": "search_files",
+        "query": query,
+        "error": result.get("error"),
+        "message": result.get("message"),
+    }
+
+
+async def _open_file(arguments: dict[str, Any]) -> dict[str, Any]:
+    file_path = str(arguments.get("file_path", "")).strip()
+    confirmed = bool(arguments.get("confirmed", False))
+
+    if not file_path:
+        return {"status": "error", "action": "open_file", "error": "File path is required."}
+
+    result = desktop_service.open_file(file_path=file_path, confirmed=confirmed)
+    details = result.get("details", {})
+    if details.get("requires_confirmation"):
+        return {
+            "status": "requires_confirmation",
+            "action": "open_file",
+            "file_name": details.get("file_name"),
+            "path": details.get("path"),
+            "message": result.get("message"),
+        }
+
+    if result.get("success"):
+        return {
+            "status": "success",
+            "action": "open_file",
+            "target": result.get("target"),
+            "path": result.get("resolved_path"),
+            "message": result.get("message"),
+        }
+    return {
+        "status": "error",
+        "action": "open_file",
+        "target": result.get("target", file_path),
+        "error": result.get("error"),
+        "message": result.get("message"),
+    }
+
+
+async def _get_current_datetime() -> dict[str, Any]:
+    result = desktop_service.get_local_datetime()
+    if result.get("success"):
+        details = result.get("details", {})
+        return {
+            "status": "success",
+            "action": "get_current_datetime",
+            "time": details.get("time"),
+            "date": details.get("date"),
+            "day_of_week": details.get("day_of_week"),
+            "timezone": details.get("timezone"),
+            "iso_timestamp": details.get("iso_timestamp"),
+            "message": result.get("message"),
+        }
+    return {
+        "status": "error",
+        "action": "get_current_datetime",
+        "error": result.get("error"),
+        "message": result.get("message"),
+    }
+
+
+async def _control_volume(arguments: dict[str, Any]) -> dict[str, Any]:
+    action = str(arguments.get("action", "")).strip()
+    steps = int(arguments.get("steps", 2))
+
+    if not action:
+        return {"status": "error", "action": "control_volume", "error": "Volume action is required."}
+
+    result = desktop_service.control_volume(action=action, steps=steps)
+    if result.get("success"):
+        return {
+            "status": "success",
+            "action": "control_volume",
+            "target": result.get("target"),
+            "steps": result.get("details", {}).get("steps"),
+            "message": result.get("message"),
+        }
+    return {
+        "status": "error",
+        "action": "control_volume",
+        "target": result.get("target", action),
+        "error": result.get("error"),
+        "message": result.get("message"),
+    }
+
+
 # ============================================================================
 # 4. CENTRAL TOOL DISPATCHER
 # ============================================================================
@@ -1421,6 +1887,26 @@ async def execute_agent_tool(
         except Exception as exc:
             logger.error("Error executing save_knowledge tool: %s", exc)
             return {"status": "error", "message": str(exc)}
+
+    # Desktop Automation
+    elif tool_name == "open_desktop_app":
+        return await _open_desktop_app(arguments)
+    elif tool_name == "open_website":
+        return await _open_website(arguments)
+    elif tool_name == "search_web_browser":
+        return await _search_web_browser(arguments)
+    elif tool_name == "open_folder":
+        return await _open_folder(arguments)
+    elif tool_name == "take_screenshot":
+        return await _take_screenshot(arguments)
+    elif tool_name == "search_files":
+        return await _search_files(arguments)
+    elif tool_name == "open_file":
+        return await _open_file(arguments)
+    elif tool_name == "get_current_datetime":
+        return await _get_current_datetime()
+    elif tool_name == "control_volume":
+        return await _control_volume(arguments)
 
     else:
         return {"error": f"Unknown tool name: {tool_name}"}

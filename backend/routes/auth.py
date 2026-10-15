@@ -18,6 +18,8 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 from backend.database import get_database
 from backend.models.user import UserCreate, UserLogin, UserResponse, TokenResponse, GoogleAuthRequest
 from backend.utils.auth import (
+    _get_or_create_firebase_user,
+    create_access_token,
     get_current_user,
     hash_password,
     verify_password,
@@ -42,9 +44,8 @@ async def google_auth(
 ):
     """Authenticate or register a user via Google OAuth.
 
-    The frontend must send the Firebase ID token in the Authorization header.
-    This endpoint verifies the token server-side and never trusts client-sent
-    email/uid/name directly.
+    The frontend sends the verified Firebase ID token in the Authorization header.
+    Resolves or creates the user record atomically using the verified claims.
     """
     if creds is None:
         raise HTTPException(
@@ -63,90 +64,16 @@ async def google_auth(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    firebase_uid = verified["uid"]
-    email = verified.get("email", "").lower()
-    name = verified.get("name", email.split("@")[0] if email else "Google User")
-    avatar_url = verified.get("picture", None)
-
-    now = datetime.now(timezone.utc)
-
-    try:
-        # Look up by firebase_uid first, then by email
-        user = await db.users.find_one({"firebase_uid": firebase_uid})
-        if not user and email:
-            user = await db.users.find_one({"email": email})
-    except PyMongoError as exc:
-        logger.error("MongoDB query failed during Google auth: %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Database operation failed during Google authentication.",
-        )
-
-    if not user:
-        # Create new user record for first-time Google sign-in
-        user_doc = {
-            "name": name,
-            "email": email,
-            "provider": "google",
-            "avatar_url": avatar_url,
-            "firebase_uid": firebase_uid,
-            "hashed_password": None,
-            "created_at": now,
-        }
-        try:
-            result = await db.users.insert_one(user_doc)
-            user_id = str(result.inserted_id)
-
-            # Create default profile and settings
-            await db.profiles.insert_one({
-                "user_id": user_id,
-                "name": name,
-                "email": email,
-                "avatar_url": avatar_url,
-                "bio": "Google Authenticated User",
-                "phone": None,
-                "location": None,
-                "updated_at": now,
-            })
-            await db.settings.insert_one({
-                "user_id": user_id,
-                "theme": "dark",
-                "language": "en",
-                "notifications_enabled": True,
-                "default_city": "Latur",
-                "updated_at": now,
-            })
-        except PyMongoError as exc:
-            logger.error("MongoDB insert failed during Google registration: %s", exc)
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Database failed to create user account.",
-            )
-    else:
-        user_id = str(user["_id"])
-        # Backfill firebase_uid and update profile if needed
-        update_fields = {}
-        if not user.get("firebase_uid"):
-            update_fields["firebase_uid"] = firebase_uid
-        if not user.get("provider"):
-            update_fields["provider"] = "google"
-        if avatar_url and not user.get("avatar_url"):
-            update_fields["avatar_url"] = avatar_url
-        if update_fields:
-            try:
-                await db.users.update_one({"_id": user["_id"]}, {"$set": update_fields})
-            except Exception as e:
-                logger.warning("Failed to update user google details: %s", e)
-
-    created_at = user.get("created_at") if user else now
+    user = await _get_or_create_firebase_user(verified, db)
+    created_at = user.get("created_at") or datetime.now(timezone.utc)
     if isinstance(created_at, str):
         created_at = datetime.fromisoformat(created_at)
 
     user_response = UserResponse(
-        id=user_id,
-        name=name if not user else user.get("name", name),
-        email=email,
-        created_at=created_at or now,
+        id=user["_id"],
+        name=user.get("name", "User"),
+        email=user.get("email", ""),
+        created_at=created_at,
     )
 
     return success_response(
@@ -156,14 +83,38 @@ async def google_auth(
 
 
 @router.post("/register", response_model=None, status_code=status.HTTP_201_CREATED)
-
 async def register(
     user_data: UserCreate,
+    creds: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme),
     db: AsyncIOMotorDatabase = Depends(get_database),
 ):
-    """Register a new user account."""
+    """Register or synchronize a user account."""
     email = str(user_data.email).lower()
 
+    # If client is already authenticated in Firebase, synchronize the account safely
+    if creds is not None:
+        try:
+            verified = verify_firebase_token(creds.credentials)
+            if not verified.get("name") and user_data.name:
+                verified["name"] = user_data.name
+            user = await _get_or_create_firebase_user(verified, db)
+            created_at = user.get("created_at") or datetime.now(timezone.utc)
+            if isinstance(created_at, str):
+                created_at = datetime.fromisoformat(created_at)
+            user_response = UserResponse(
+                id=user["_id"],
+                name=user.get("name", user_data.name),
+                email=user.get("email", email),
+                created_at=created_at,
+            )
+            return success_response(
+                data={"user": user_response.model_dump()},
+                message="Registration successful.",
+            )
+        except ValueError as exc:
+            logger.warning("Firebase token verification during register fallback: %s", exc)
+
+    # Direct registration flow
     try:
         existing = await db.users.find_one({"email": email})
     except PyMongoError as exc:
@@ -191,25 +142,33 @@ async def register(
         result = await db.users.insert_one(user_doc)
         user_id = str(result.inserted_id)
 
-        # Create default profile and settings for new user
-        await db.profiles.insert_one({
-            "user_id": user_id,
-            "name": user_data.name,
-            "email": email,
-            "avatar_url": None,
-            "bio": None,
-            "phone": None,
-            "location": None,
-            "updated_at": now,
-        })
-        await db.settings.insert_one({
-            "user_id": user_id,
-            "theme": "dark",
-            "language": "en",
-            "notifications_enabled": True,
-            "default_city": "Latur",
-            "updated_at": now,
-        })
+        # Create default profile and settings for new user idempotently
+        await db.profiles.update_one(
+            {"user_id": user_id},
+            {"$setOnInsert": {
+                "user_id": user_id,
+                "name": user_data.name,
+                "email": email,
+                "avatar_url": None,
+                "bio": None,
+                "phone": None,
+                "location": None,
+                "updated_at": now,
+            }},
+            upsert=True,
+        )
+        await db.settings.update_one(
+            {"user_id": user_id},
+            {"$setOnInsert": {
+                "user_id": user_id,
+                "theme": "dark",
+                "language": "en",
+                "notifications_enabled": True,
+                "default_city": "Latur",
+                "updated_at": now,
+            }},
+            upsert=True,
+        )
     except PyMongoError as exc:
         logger.error("MongoDB insert failed during registration: %s", exc)
         raise HTTPException(
@@ -223,8 +182,14 @@ async def register(
         email=email,
         created_at=now,
     )
+    access_token = create_access_token({"sub": user_id, "email": email})
     return success_response(
-        data={"user": user_response.model_dump()},
+        data={
+            "user": user_response.model_dump(),
+            "access_token": access_token,
+            "token": access_token,
+            "token_type": "bearer",
+        },
         message="Registration successful.",
     )
 
@@ -264,8 +229,14 @@ async def login(
         email=user["email"],
         created_at=created_at or datetime.now(timezone.utc),
     )
+    access_token = create_access_token({"sub": user_id, "email": user["email"]})
     return success_response(
-        data={"user": user_response.model_dump()},
+        data={
+            "user": user_response.model_dump(),
+            "access_token": access_token,
+            "token": access_token,
+            "token_type": "bearer",
+        },
         message="Login successful.",
     )
 

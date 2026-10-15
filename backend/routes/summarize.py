@@ -17,6 +17,7 @@ from backend.services.document_extractor import (
     DocumentExtractionError,
     extract_text_from_document,
 )
+from backend.utils.auth import get_current_user
 from backend.utils.response import success_response
 
 logger = logging.getLogger(__name__)
@@ -87,6 +88,7 @@ def _parse_summary_json(content: str) -> dict | None:
 @router.post("")
 async def summarize_document(
     body: SummarizeRequest,
+    current_user: dict = Depends(get_current_user),
     ai_service: AIService = Depends(get_ai_service),
 ):
     """

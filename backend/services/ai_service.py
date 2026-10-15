@@ -135,19 +135,36 @@ class AIService:
                 "Use this to resolve relative dates like 'tomorrow', 'next week', or 'in 2 hours'. "
                 "Rules you MUST follow for every response:\n"
                 "1. ALWAYS call the appropriate tool immediately — never just describe what you would do.\n"
-                "2. After the tool succeeds reply with ONE short sentence, 5 words or fewer. "
-                "Examples: 'Done. Task added.', 'Task deleted.', 'Here are your tasks.', 'Task updated.', 'Reminder set.'\n"
-                "3. For view/list requests, briefly name the items (title only, no IDs, no dates unless essential).\n"
-                "4. NEVER output Markdown, JSON, bullet points, IDs, UUIDs, or long explanations.\n"
-                "5. NEVER say 'I can help you with that' or give generic filler sentences."
+                "2. When a tool succeeds, reply with ONE short sentence confirming the actual action taken "
+                "(e.g. 'Opening Chrome.', 'Opened YouTube.', 'Opened Downloads.', 'Screenshot taken.', "
+                "'Volume increased.', 'It is 10:45 PM.').\n"
+                "3. If a tool fails or reports an error, state the error truthfully in ONE short sentence "
+                "(e.g. 'Could not take screenshot.', 'File not found.', 'Please specify which folder to search.'). "
+                "NEVER say an action succeeded if the tool returned an error.\n"
+                "4. If an action requires confirmation (such as opening an executable file or terminal), ask for confirmation in ONE short sentence.\n"
+                "5. For file search requests without a specified folder, ask which folder to search (e.g. Documents, Downloads, Desktop).\n"
+                "6. For view/list requests, briefly name the items (title only, no IDs, no dates unless essential).\n"
+                "7. NEVER output Markdown, JSON, bullet points, IDs, UUIDs, or long explanations.\n"
+                "8. NEVER say generic filler sentences like 'Done.' without confirming the actual action.\n"
+                "9. For factual, mathematical, or general knowledge questions (e.g. 'What is the largest city by area?'), "
+                "answer directly with concise facts and do NOT call desktop tools."
             )
         else:
             system_prompt = (
                 "You are Jarvis, a highly capable and friendly AI productivity assistant. "
                 "You help users manage tasks, take notes, set reminders, manage calendar events, check weather, get news, and summarize documents. "
+                "You can also control Windows desktop automation: open approved applications, open websites, search the web in the browser, "
+                "open folders, take screenshots, search files inside permitted user folders, open files with default applications, "
+                "report current local date and time, and adjust system volume. "
+                "Safety guidelines:\n"
+                "- If a file search is ambiguous or omits the target folder, ask the user which folder to search (e.g. Documents, Downloads, Desktop).\n"
+                "- Never attempt whole-drive searches. Only search permitted user folders.\n"
+                "- Require explicit user confirmation before opening sensitive executable/script files.\n"
+                "- Do not read, upload, or transmit private file contents unless the user explicitly requests it.\n"
+                "- For informational and general knowledge questions (e.g. 'What is the largest city by area?'), answer directly with accurate information and do NOT invoke desktop tools.\n"
                 "You also have access to the user's private knowledge base, memory, and uploaded documents in Qdrant vector storage. "
-                "When a user request requires multiple actions (for example: checking weather AND setting a reminder, or viewing tasks AND creating a note), "
-                "you MUST invoke all necessary function tools (either simultaneously in one turn or sequentially across turns) before providing your final response. "
+                "When a user request requires multiple actions (for example: checking weather AND setting a reminder, or taking a screenshot AND opening the folder), "
+                "you MUST invoke all necessary function tools before providing your final response. "
                 "Combine and summarize the execution results of ALL tools into a single cohesive, natural, clear, and professional response. "
                 f"The current UTC date and time is {current_time_str}. Use this exact timestamp to calculate relative dates like 'tomorrow', 'next week', or 'in 2 hours'."
             )
@@ -221,6 +238,7 @@ class AIService:
                             conversation_key=conversation_key,
                             confirmation_granted=True,
                             action_arguments_override=validated_arguments,
+                            voice_mode=voice_mode,
                         )
             elif decision_engine.is_productivity_request(message, decision):
                 reply = await self._process_intelligence_request(
@@ -230,8 +248,10 @@ class AIService:
                     messages=openai_messages,
                     decision=decision,
                     conversation_key=conversation_key,
+                    voice_mode=voice_mode,
                 )
             else:
+                executed_tools: list[tuple[str, dict[str, Any]]] = []
                 for _ in range(max_tool_loops):
                     # Call configured AI Provider (Gemini / OpenAI / custom)
                     response = await self.generate(
@@ -266,6 +286,7 @@ class AIService:
                             logger.info("[AI AGENT] Executing tool '%s'", tool_name)
 
                             tool_result = await execute_agent_tool(tool_name, tool_args, db, user_id)
+                            executed_tools.append((tool_name, tool_result))
 
                             openai_messages.append({
                                 "role": "tool",
@@ -275,12 +296,54 @@ class AIService:
                     else:
                         reply = (response.content or "").strip()
                         break
+
+                if executed_tools:
+                    failed_tools = [res for _, res in executed_tools if res.get("status") == "error"]
+                    confirmation_tools = [res for _, res in executed_tools if res.get("status") == "requires_confirmation"]
+
+                    if failed_tools:
+                        error_msg = (
+                            failed_tools[0].get("error")
+                            or failed_tools[0].get("message")
+                            or "Action could not be completed."
+                        )
+                        reply_lower = reply.lower()
+                        negative_cues = (
+                            "error", "fail", "not", "unable", "cannot",
+                            "couldn't", "could not", "sorry", "unrecognized",
+                            "unsupported", "does not exist",
+                        )
+                        # Truthfully announce failure if AI claimed success or didn't report error
+                        if (
+                            not reply
+                            or not any(cue in reply_lower for cue in negative_cues)
+                            or reply_lower.startswith(("done", "opened", "launched", "success"))
+                        ):
+                            reply = error_msg
+                    elif confirmation_tools:
+                        conf_msg = (
+                            confirmation_tools[0].get("message")
+                            or "Confirmation is required to execute this action."
+                        )
+                        if not reply or "confirm" not in reply.lower():
+                            reply = conf_msg
+                    else:
+                        # Success: replace generic placeholders with actual tool outcome
+                        if not reply or reply in ("Done.", "Done", "Done! I've processed your request."):
+                            last_msg = executed_tools[-1][1].get("message")
+                            if last_msg:
+                                reply = last_msg
+                            else:
+                                reply = "Done." if voice_mode else "Done! I've processed your request."
         except Exception as exc:
             logger.error("Error during AI agent execution: %s", exc)
             reply = "Something went wrong while processing your request."
 
         if not reply:
-            reply = "Done." if voice_mode else "Done! I've processed your request."
+            reply = "I couldn't process your request." if voice_mode else "Done! I've processed your request."
+
+        if voice_mode:
+            reply = self._strip_voice_markdown(reply)
 
         if persist_history:
             try:
@@ -307,6 +370,7 @@ class AIService:
         conversation_key: str,
         confirmation_granted: bool = False,
         action_arguments_override: list[dict[str, Any]] | None = None,
+        voice_mode: bool = False,
     ) -> str:
         """Run applicable productivity requests once, only through the engine executor."""
         action_arguments = action_arguments_override
@@ -379,6 +443,7 @@ class AIService:
         return await self._generate_intelligence_reply(
             messages=messages,
             result=result,
+            voice_mode=voice_mode,
         )
 
     @staticmethod
@@ -565,6 +630,7 @@ class AIService:
         *,
         messages: list[dict[str, Any]],
         result: IntelligenceResult,
+        voice_mode: bool = False,
     ) -> str:
         """Use the configured provider for wording, never for a second tool action."""
         if result.status == "requires_confirmation":
@@ -602,10 +668,36 @@ class AIService:
         response = await self.generate(messages=response_messages)
         reply = (response.content or "").strip()
         if reply and not reply.startswith("AI services are temporarily unavailable"):
-            return reply
+            return self._strip_voice_markdown(reply) if voice_mode else reply
         if result.status == ActionExecutionStatus.COMPLETED.value:
-            return "Done! I've processed your request."
+            return "Done." if voice_mode else "Done! I've processed your request."
         return "I couldn't complete that action. Please try again."
+
+    @staticmethod
+    def _strip_voice_markdown(text: str) -> str:
+        """Strip markdown syntax to ensure clean spoken output for TTS."""
+        if not text:
+            return ""
+        # Remove markdown code blocks
+        text = re.sub(r"```[\s\S]*?```", " ", text)
+        # Remove inline code
+        text = re.sub(r"`([^`]+)`", r"\1", text)
+        # Remove images and markdown links: [text](url) -> text
+        text = re.sub(r"!\[([^\]]*)\]\([^)]*\)", r"\1", text)
+        text = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", text)
+        # Remove headers (#)
+        text = re.sub(r"^#{1,6}\s+", "", text, flags=re.MULTILINE)
+        # Remove bold / italics (*, **, _, __)
+        text = re.sub(r"[*_]{1,3}([^*_]+)[*_]{1,3}", r"\1", text)
+        # Remove blockquotes (>)
+        text = re.sub(r"^>\s+", "", text, flags=re.MULTILINE)
+        # Remove list markers (- , * , 1. )
+        text = re.sub(r"^\s*[-*+]\s+", "", text, flags=re.MULTILINE)
+        text = re.sub(r"^\s*\d+\.\s+", "", text, flags=re.MULTILINE)
+        # Clean extra whitespace
+        text = re.sub(r"[ \t]+", " ", text)
+        text = re.sub(r"\n\s*\n+", ". ", text)
+        return text.replace("\n", " ").strip()
 
     async def get_history(
         self, db: AsyncIOMotorDatabase, user_id: str, limit: int = 50, conversation_id: str | None = None

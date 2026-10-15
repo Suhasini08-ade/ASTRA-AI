@@ -141,9 +141,10 @@ export default function Sidebar({ isOpen, onClose }) {
               </div>
             </div>
             <button
-              onClick={() => {
-                logout();
+              onClick={async () => {
+                await logout();
                 if (onClose) onClose();
+                navigate('/login');
               }}
               className="p-1.5 text-on-surface-variant hover:text-error hover:bg-red-50 dark:hover:bg-red-950/30 rounded-lg transition-colors"
               title="Log Out"

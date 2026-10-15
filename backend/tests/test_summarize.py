@@ -110,12 +110,26 @@ class DocumentExtractorTests(unittest.TestCase):
         self.assertIn("[... Document content truncated", extracted)
 
 
+from backend.utils.auth import get_current_user
+
+
 class SummarizerRouteTests(unittest.TestCase):
     def setUp(self):
+        self.mock_user = {"_id": "test_user_123", "email": "test@example.com"}
+        app.dependency_overrides[get_current_user] = lambda: self.mock_user
         self.client = TestClient(app)
 
     def tearDown(self):
         app.dependency_overrides.clear()
+
+    def test_summarize_without_auth_returns_401(self):
+        """POST /api/summarize must reject unauthenticated requests with HTTP 401."""
+        app.dependency_overrides.pop(get_current_user, None)
+        response = self.client.post(
+            "/api/summarize",
+            json={"fileContent": "test content", "fileName": "test.txt", "fileType": "text"},
+        )
+        self.assertEqual(response.status_code, 401)
 
     def test_summarize_success_with_gemini(self):
         """Test summarization when Gemini provider is available and responds."""

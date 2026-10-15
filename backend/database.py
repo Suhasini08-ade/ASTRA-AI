@@ -28,13 +28,16 @@ async def connect_db() -> None:
             "<password> with URL-encoded Atlas credentials."
         )
 
-    # Keep an unavailable local MongoDB from delaying the whole API startup.
-    client = AsyncIOMotorClient(
-        settings.MONGODB_URI,
-        serverSelectionTimeoutMS=10000,
-        connectTimeoutMS=10000,
-    )
-    database = client[settings.MONGODB_DB_NAME]
+    if _client is None:
+        client = AsyncIOMotorClient(
+            settings.MONGODB_URI,
+            serverSelectionTimeoutMS=10000,
+            connectTimeoutMS=10000,
+        )
+        database = client[settings.MONGODB_DB_NAME]
+    else:
+        client = _client
+        database = _database if _database is not None else client[settings.MONGODB_DB_NAME]
 
     try:
         # Motor connects lazily; ping makes startup verify DNS, TLS, Atlas IP
@@ -58,6 +61,8 @@ async def connect_db() -> None:
     except Exception as exc:
         logger.error("MongoDB connection/startup failed: %s", exc)
         client.close()
+        _client = None
+        _database = None
         raise
 
     _client = client
@@ -77,6 +82,16 @@ async def close_db() -> None:
 
 def get_database() -> AsyncIOMotorDatabase:
     """FastAPI dependency that returns the database instance."""
+    global _client, _database
+    if _database is None:
+        settings = get_settings()
+        if "<" not in settings.MONGODB_URI and ">" not in settings.MONGODB_URI:
+            _client = AsyncIOMotorClient(
+                settings.MONGODB_URI,
+                serverSelectionTimeoutMS=10000,
+                connectTimeoutMS=10000,
+            )
+            _database = _client[settings.MONGODB_DB_NAME]
     if _database is None:
         raise RuntimeError("Database not initialized. Call connect_db() first.")
     return _database

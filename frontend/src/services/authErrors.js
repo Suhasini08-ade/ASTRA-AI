@@ -19,6 +19,8 @@ export function getAuthErrorMessage(error, context = 'login') {
     'auth/weak-password': 'Choose a stronger password with at least 6 characters.',
     'auth/popup-closed-by-user': 'Google sign-in was cancelled.',
     'auth/cancelled-popup-request': 'Google sign-in was cancelled.',
+    'auth/popup-blocked': 'Google sign-in popup was blocked by your browser. Please allow popups for this site.',
+    'auth/unauthorized-domain': 'This domain is not authorized for Google Sign-In in Firebase Console.',
     'auth/expired-action-code': 'This password reset link has expired. Request a new one.',
     'auth/invalid-action-code': 'This password reset link is invalid or has already been used. Request a new one.',
     'auth/user-disabled': 'This account is unavailable. Please contact support.',

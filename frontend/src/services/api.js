@@ -12,6 +12,13 @@ import { auth } from './firebase';
  * Returns null if no user is signed in.
  */
 async function getFirebaseIdToken() {
+  if (auth && typeof auth.authStateReady === 'function') {
+    try {
+      await auth.authStateReady();
+    } catch {
+      // Ignore initialization errors here
+    }
+  }
   const user = auth?.currentUser;
   if (!user) return null;
   try {
@@ -23,11 +30,32 @@ async function getFirebaseIdToken() {
   }
 }
 
-// Legacy token storage — kept for backward-compatible email/password flow
+// Token and session storage
 const TOKEN_KEY = 'astra_access_token';
+const USER_KEY = 'astra_cached_user';
+
 export const getAuthToken = () => localStorage.getItem(TOKEN_KEY);
 export const setAuthToken = (token) => localStorage.setItem(TOKEN_KEY, token);
 export const removeAuthToken = () => localStorage.removeItem(TOKEN_KEY);
+
+export const getCachedUser = () => {
+  try {
+    const raw = localStorage.getItem(USER_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+};
+export const setCachedUser = (user) => {
+  try {
+    if (user) {
+      localStorage.setItem(USER_KEY, JSON.stringify(user));
+    } else {
+      localStorage.removeItem(USER_KEY);
+    }
+  } catch {}
+};
+export const removeCachedUser = () => localStorage.removeItem(USER_KEY);
 
 /**
  * Common fetch wrapper with automatic Firebase ID token injection.
@@ -52,7 +80,10 @@ export async function fetchAPI(endpoint, options = {}) {
     headers,
   };
 
-  const response = await fetch(endpoint, config);
+  const baseUrl = import.meta.env.VITE_API_BASE_URL || '';
+  const url = endpoint.startsWith('http') ? endpoint : `${baseUrl}${endpoint}`;
+
+  const response = await fetch(url, config);
   const isJson = response.headers.get('content-type')?.includes('application/json');
   const data = isJson ? await response.json() : null;
 

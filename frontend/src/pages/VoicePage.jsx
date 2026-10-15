@@ -9,6 +9,7 @@ export default function VoicePage() {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const isProcessingRef = useRef(false); // ref-mirror to prevent duplicate submissions
+  const lastSubmissionRef = useRef({ text: '', timestamp: 0 }); // Debounce identical transcripts
   const recognitionRef = useRef(null);
 
   const [transcript, setTranscript] = useState([]);
@@ -39,7 +40,31 @@ export default function VoicePage() {
       recognition.onerror = (err) => {
         console.warn('SpeechRecognition error:', err);
         setIsListening(false);
-        if (showError) showError('Speech recognition error: ' + (err.error || 'Unknown error'));
+        let message = 'Speech recognition error.';
+        switch (err.error) {
+          case 'not-allowed':
+          case 'service-not-allowed':
+            message = 'Microphone access was denied. Please allow microphone permissions in your browser.';
+            break;
+          case 'audio-capture':
+            message = 'Microphone capture failed. Please ensure a microphone is connected and working.';
+            break;
+          case 'no-speech':
+            message = 'No speech was detected. Please try speaking again.';
+            break;
+          case 'network':
+            message = 'Speech recognition network error. Please verify your connection.';
+            break;
+          case 'aborted':
+            return;
+          default:
+            message = `Speech recognition error: ${err.error || 'Unknown error'}.`;
+        }
+        if (showError) showError(message);
+        setTranscript((prev) => [
+          ...prev,
+          { id: Date.now(), speaker: 'System Error', text: message },
+        ]);
       };
 
       recognition.onend = () => {
@@ -88,19 +113,33 @@ export default function VoicePage() {
   };
 
   const handleUserVoiceInput = async (inputText) => {
-    if (!inputText || !inputText.trim()) return;
+    const trimmed = (inputText || '').trim();
+    if (!trimmed) return;
     // Prevent duplicate submissions while a previous command is still processing.
     if (isProcessingRef.current) return;
 
+    // Prevent rapid duplicate submissions of identical text within 2.5 seconds
+    const now = Date.now();
+    if (
+      lastSubmissionRef.current.text.toLowerCase() === trimmed.toLowerCase() &&
+      now - lastSubmissionRef.current.timestamp < 2500
+    ) {
+      console.warn('Ignoring duplicate voice transcript within debounce window:', trimmed);
+      return;
+    }
+    lastSubmissionRef.current = { text: trimmed, timestamp: now };
+
     setTranscript((prev) => [
       ...prev,
-      { id: Date.now(), speaker: 'You', text: inputText },
+      { id: Date.now(), speaker: 'You', text: trimmed },
     ]);
 
-    await sendVoiceCommand(inputText);
+    await sendVoiceCommand(trimmed);
   };
 
   const startListening = () => {
+    if (isProcessingRef.current) return;
+
     // Stop any current speaking synthesis
     if ('speechSynthesis' in window) {
       window.speechSynthesis.cancel();
@@ -117,7 +156,7 @@ export default function VoicePage() {
         setIsListening(true);
       }
     } else {
-      if (showError) showError('Web Speech API is not supported in this browser.');
+      if (showError) showError('Web Speech API is not supported in this browser. Please use Google Chrome or Microsoft Edge.');
     }
   };
 
@@ -142,8 +181,12 @@ export default function VoicePage() {
     const lastAstraMsg = [...transcript].reverse().find((item) => item.speaker === 'Astra Voice');
     const textToReplay = lastAstraMsg?.text;
     
+    if (!textToReplay) {
+      if (showInfo) showInfo('No previous spoken response to replay.');
+      return;
+    }
     if (showSuccess) showSuccess('Retrying voice audio response playback...');
-    if (textToReplay) speakText(textToReplay);
+    speakText(textToReplay);
   };
 
   return (
@@ -230,6 +273,8 @@ export default function VoicePage() {
               className={`p-2.5 rounded-xl text-xs font-body ${
                 item.speaker === 'You'
                   ? 'bg-primary/10 text-primary dark:text-blue-300 font-medium'
+                  : item.speaker === 'System Error'
+                  ? 'bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-900 font-medium'
                   : 'bg-surface-container-low dark:bg-slate-700/50 text-on-surface dark:text-slate-200'
               }`}
             >

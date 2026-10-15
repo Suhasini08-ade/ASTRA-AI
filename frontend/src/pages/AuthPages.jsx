@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useNavigate, Link, useSearchParams } from 'react-router-dom';
+import { useNavigate, Link, useSearchParams, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { confirmResetPassword, resetPassword, verifyResetCode } from '../services/firebase';
@@ -13,14 +13,17 @@ export function LoginPage() {
   const { login, loginWithGoogle, loading } = useAuth();
   const { showError, showSuccess } = useToast();
   const navigate = useNavigate();
+  const location = useLocation();
+
+  const redirectTarget = location.state?.from?.pathname || '/app';
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError(null);
     try {
-      await login(email, password);
+      await login(email.trim(), password);
       if (showSuccess) showSuccess('Signed in successfully!');
-      navigate('/app');
+      navigate(redirectTarget, { replace: true });
     } catch (err) {
       const message = getAuthErrorMessage(err, 'login');
       setError(message);
@@ -33,7 +36,7 @@ export function LoginPage() {
     try {
       await loginWithGoogle();
       if (showSuccess) showSuccess('Google authentication successful!');
-      navigate('/app');
+      navigate(redirectTarget, { replace: true });
     } catch (err) {
       const message = getAuthErrorMessage(err, 'login');
       setError(message);
@@ -133,6 +136,7 @@ export function SignupPage() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState(null);
   const { signup, loginWithGoogle, loading } = useAuth();
   const { showError, showSuccess } = useToast();
@@ -141,10 +145,32 @@ export function SignupPage() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError(null);
+
+    const trimmedName = name.trim();
+    const trimmedEmail = email.trim();
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+    if (!trimmedName) {
+      setError('Please enter your full name.');
+      return;
+    }
+    if (!trimmedEmail || !emailRegex.test(trimmedEmail)) {
+      setError('Please enter a valid email address.');
+      return;
+    }
+    if (!password || password.length < 6) {
+      setError('Password must be at least 6 characters.');
+      return;
+    }
+    if (password !== confirmPassword) {
+      setError('Passwords do not match. Please check and try again.');
+      return;
+    }
+
     try {
-      await signup(email, password, name);
+      await signup(trimmedEmail, password, trimmedName);
       if (showSuccess) showSuccess('Account created successfully!');
-      navigate('/app');
+      navigate('/app', { replace: true });
     } catch (err) {
       const message = getAuthErrorMessage(err, 'signup');
       setError(message);
@@ -157,7 +183,7 @@ export function SignupPage() {
     try {
       await loginWithGoogle();
       if (showSuccess) showSuccess('Google authentication successful!');
-      navigate('/app');
+      navigate('/app', { replace: true });
     } catch (err) {
       const message = getAuthErrorMessage(err, 'signup');
       setError(message);
@@ -178,7 +204,7 @@ export function SignupPage() {
         </div>
 
         {error && (
-          <div className="mb-4 p-3 bg-red-100 dark:bg-red-950/60 border border-red-300 dark:border-red-800 text-red-700 dark:text-red-300 rounded-xl text-xs font-semibold">
+          <div role="alert" className="mb-4 p-3 bg-red-100 dark:bg-red-950/60 border border-red-300 dark:border-red-800 text-red-700 dark:text-red-300 rounded-xl text-xs font-semibold">
             {error}
           </div>
         )}
@@ -218,6 +244,19 @@ export function SignupPage() {
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
+              placeholder="••••••••••••"
+              className="w-full bg-surface-container-low dark:bg-slate-700 border border-outline-variant/40 dark:border-slate-600 rounded-xl px-4 py-2.5 text-sm text-on-surface dark:text-slate-100 focus:outline-none focus:border-primary"
+              required
+            />
+          </div>
+          <div>
+            <label className="font-label text-xs font-semibold text-on-surface dark:text-slate-200 block mb-1">
+              Confirm Password
+            </label>
+            <input
+              type="password"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
               placeholder="••••••••••••"
               className="w-full bg-surface-container-low dark:bg-slate-700 border border-outline-variant/40 dark:border-slate-600 rounded-xl px-4 py-2.5 text-sm text-on-surface dark:text-slate-100 focus:outline-none focus:border-primary"
               required
@@ -270,15 +309,27 @@ export function RecoverPasswordPage() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
+    const trimmed = email.trim();
+    if (!trimmed || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
+      setError('Please enter a valid email address.');
+      return;
+    }
     setSubmitting(true);
     try {
-      await resetPassword(email.trim());
+      await resetPassword(trimmed);
       setSent(true);
-      showSuccess?.('Password reset email sent.');
+      showSuccess?.('If an account matches that email address, a password reset link has been sent.');
     } catch (err) {
-      const message = getAuthErrorMessage(err, 'recovery');
-      setError(message);
-      showError?.(message);
+      const code = err?.code;
+      // Security best practice: never leak account existence
+      if (code === 'auth/user-not-found' || code === 'auth/invalid-credential') {
+        setSent(true);
+        showSuccess?.('If an account matches that email address, a password reset link has been sent.');
+      } else {
+        const message = getAuthErrorMessage(err, 'recovery');
+        setError(message);
+        showError?.(message);
+      }
     } finally {
       setSubmitting(false);
     }

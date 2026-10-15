@@ -9,7 +9,13 @@ import {
   auth,
 } from '../services/firebase';
 import {
+  getAuthToken,
+  setAuthToken,
   removeAuthToken,
+  getCachedUser,
+  setCachedUser,
+  removeCachedUser,
+  apiLogin,
   apiGoogleAuth,
   apiGetMe,
   apiRegister,
@@ -18,83 +24,213 @@ import {
 const AuthContext = createContext();
 
 export function AuthProvider({ children }) {
-  const [currentUser, setCurrentUser] = useState(null);
-  const [loading, setLoading] = useState(true);
+  // Initialize currentUser immediately from persistent cache so page reloads / HMR never kick user out
+  const [currentUser, setCurrentUser] = useState(() => getCachedUser());
+  const [loading, setLoading] = useState(() => !getCachedUser());
 
-  // Restore authenticated session from Firebase on mount
+  // Restore authenticated session from Firebase or persistent token on mount
   useEffect(() => {
+    let isMounted = true;
+
     if (!isFirebaseConfigured) {
-      setLoading(false);
-      return;
+      // Check for local JWT session if Firebase is disabled
+      const localToken = getAuthToken();
+      const cached = getCachedUser();
+      if (localToken && cached) {
+        apiGetMe()
+          .then((res) => {
+            if (isMounted && res?.data) {
+              const u = {
+                id: res.data.id,
+                uid: res.data.id,
+                email: res.data.email,
+                displayName: res.data.name || res.data.email?.split('@')[0],
+                photoURL: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=256',
+              };
+              setCurrentUser(u);
+              setCachedUser(u);
+            }
+          })
+          .catch((err) => {
+            const isAuthFail = err?.message?.includes('401') || err?.message?.toLowerCase().includes('unauthorized');
+            if (isAuthFail && isMounted) {
+              setCurrentUser(null);
+              removeCachedUser();
+              removeAuthToken();
+            }
+          })
+          .finally(() => {
+            if (isMounted) setLoading(false);
+          });
+      } else {
+        setLoading(false);
+      }
+      return () => { isMounted = false; };
     }
 
     const unsubscribe = onAuthStateChange(async (fbUser) => {
+      if (!isMounted) return;
+
       if (fbUser) {
+        // 1. Immediately ensure state has valid user credentials from Firebase
+        const baseUser = {
+          id: fbUser.uid,
+          uid: fbUser.uid,
+          email: fbUser.email,
+          displayName: fbUser.displayName || fbUser.email?.split('@')[0],
+          photoURL: fbUser.photoURL || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=256',
+        };
+        setCurrentUser((prev) => prev || baseUser);
+
         try {
-          // Use Firebase ID token (auto-injected by fetchAPI) to call /me
+          // 2. Fetch authoritative database profile from backend
           const res = await apiGetMe();
-          if (res?.data) {
-            setCurrentUser({
-              id: res.data.id,
+          if (isMounted && res?.data) {
+            const enrichedUser = {
+              id: res.data.id || fbUser.uid,
               uid: fbUser.uid,
               email: res.data.email || fbUser.email,
               displayName: res.data.name || fbUser.displayName || fbUser.email?.split('@')[0],
               photoURL: fbUser.photoURL || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=256',
-            });
+            };
+            setCurrentUser(enrichedUser);
+            setCachedUser(enrichedUser);
           }
         } catch (err) {
-          // User is authenticated in Firebase but not yet registered in backend.
-          // For Google users, register them via /api/auth/google.
-          // For email users, they'll be registered during signup.
-          if (fbUser.providerData?.[0]?.providerId === 'google.com') {
-            try {
-              const res = await apiGoogleAuth();
-              if (res?.data?.user) {
-                setCurrentUser({
-                  id: res.data.user.id,
-                  uid: fbUser.uid,
-                  email: res.data.user.email,
-                  displayName: res.data.user.name || fbUser.displayName,
-                  photoURL: fbUser.photoURL || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=256',
-                });
-              }
-            } catch (syncErr) {
-              console.warn('Firebase sync to backend failed:', syncErr);
+          console.warn('Backend user resolution on auth state change failed:', err);
+          // CRITICAL: Only drop session if token was genuinely rejected as unauthorized (401)
+          // If it's a network glitch or backend server reload (503/Failed to fetch), KEEP USER SIGNED IN!
+          const isExplicitAuthReject =
+            err?.message?.includes('401') ||
+            err?.message?.toLowerCase().includes('unauthorized') ||
+            err?.message?.toLowerCase().includes('expired');
+
+          if (isExplicitAuthReject) {
+            if (isMounted) {
+              setCurrentUser(null);
+              removeCachedUser();
+              removeAuthToken();
             }
           } else {
-            console.warn('Backend /me failed for Firebase user:', err);
+            // Server might be restarting — retain current user session
+            setCachedUser((prev) => prev || baseUser);
           }
         }
       } else {
-        setCurrentUser(null);
+        // Firebase has no active user. Check if there is a local JWT access token
+        const localToken = getAuthToken();
+        const cached = getCachedUser();
+        if (localToken && cached) {
+          try {
+            const res = await apiGetMe();
+            if (isMounted && res?.data) {
+              const u = {
+                id: res.data.id,
+                uid: res.data.id,
+                email: res.data.email,
+                displayName: res.data.name || res.data.email?.split('@')[0],
+                photoURL: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=256',
+              };
+              setCurrentUser(u);
+              setCachedUser(u);
+            }
+          } catch (err) {
+            const isExplicitAuthReject =
+              err?.message?.includes('401') ||
+              err?.message?.toLowerCase().includes('unauthorized');
+            if (isExplicitAuthReject && isMounted) {
+              setCurrentUser(null);
+              removeCachedUser();
+              removeAuthToken();
+            }
+          }
+        } else {
+          if (isMounted) {
+            setCurrentUser(null);
+            removeCachedUser();
+          }
+        }
       }
-      setLoading(false);
+
+      if (isMounted) setLoading(false);
     });
 
-    return unsubscribe;
+    return () => {
+      isMounted = false;
+      unsubscribe();
+    };
   }, []);
 
   const login = async (email, password) => {
     setLoading(true);
     try {
-      // 1. Sign in with Firebase first — this establishes the Firebase session
+      let loggedIn = false;
+      let userData = null;
+      let lastErr = null;
+
+      // 1. Attempt Firebase authentication first (if enabled)
       if (isFirebaseConfigured) {
-        await signInWithEmail(email, password);
+        try {
+          const cred = await signInWithEmail(email, password);
+          const fbUser = cred.user || auth?.currentUser;
+
+          try {
+            const res = await apiGetMe();
+            if (res?.data) {
+              userData = {
+                id: res.data.id,
+                uid: fbUser?.uid || res.data.id,
+                email: res.data.email || fbUser?.email || email,
+                displayName: res.data.name || fbUser?.displayName || email.split('@')[0],
+                photoURL: fbUser?.photoURL || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=256',
+              };
+            }
+          } catch (backendErr) {
+            console.warn('Backend /me resolution delayed after Firebase login:', backendErr);
+            userData = {
+              id: fbUser?.uid,
+              uid: fbUser?.uid,
+              email: fbUser?.email || email,
+              displayName: fbUser?.displayName || email.split('@')[0],
+              photoURL: fbUser?.photoURL || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=256',
+            };
+          }
+          loggedIn = true;
+        } catch (fbErr) {
+          lastErr = fbErr;
+          console.info('Firebase email sign-in attempt passed to backend check:', fbErr?.code || fbErr?.message);
+        }
       }
 
-      // 2. The Firebase ID token is now available via auth.currentUser.getIdToken()
-      //    The /me endpoint will resolve the user using the verified token
-      const res = await apiGetMe();
-      if (res?.data) {
-        const fbUser = auth?.currentUser;
-        setCurrentUser({
-          id: res.data.id,
-          uid: fbUser?.uid || res.data.id,
-          email: res.data.email,
-          displayName: res.data.name || email.split('@')[0],
-          photoURL: fbUser?.photoURL || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=256',
-        });
+      // 2. Fallback to direct backend authentication (for database-stored users)
+      if (!loggedIn) {
+        try {
+          const res = await apiLogin(email, password);
+          if (res?.data?.user) {
+            const u = res.data.user;
+            const token = res.data.access_token || res.data.token;
+            if (token) setAuthToken(token);
+            userData = {
+              id: u.id,
+              uid: u.id,
+              email: u.email,
+              displayName: u.name || u.email?.split('@')[0],
+              photoURL: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=256',
+            };
+            loggedIn = true;
+          }
+        } catch (apiErr) {
+          // If backend also fails, rethrow the most specific error
+          throw lastErr || apiErr;
+        }
       }
+
+      if (!loggedIn || !userData) {
+        throw lastErr || new Error('Invalid email or password.');
+      }
+
+      setCurrentUser(userData);
+      setCachedUser(userData);
       setLoading(false);
       return true;
     } catch (err) {
@@ -106,25 +242,64 @@ export function AuthProvider({ children }) {
   const signup = async (email, password, name) => {
     setLoading(true);
     try {
-      // 1. Create Firebase user first
+      let registeredUser = null;
+
       if (isFirebaseConfigured) {
-        await signUpWithEmail(email, password);
+        try {
+          const cred = await signUpWithEmail(email, password, name);
+          const fbUser = cred.user || auth?.currentUser;
+
+          try {
+            await apiRegister(name, email, password);
+          } catch (syncErr) {
+            console.warn('Backend register sync warning:', syncErr);
+          }
+
+          try {
+            const res = await apiGetMe();
+            registeredUser = {
+              id: res?.data?.id || fbUser?.uid,
+              uid: fbUser?.uid,
+              email: res?.data?.email || email,
+              displayName: res?.data?.name || name || email.split('@')[0],
+              photoURL: fbUser?.photoURL || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=256',
+            };
+          } catch {
+            registeredUser = {
+              id: fbUser?.uid,
+              uid: fbUser?.uid,
+              email: email,
+              displayName: name || email.split('@')[0],
+              photoURL: fbUser?.photoURL || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=256',
+            };
+          }
+        } catch (fbErr) {
+          console.info('Firebase signup fallback to backend:', fbErr?.code || fbErr?.message);
+        }
       }
 
-      // 2. Register in the backend — the Firebase ID token is auto-sent
-      const res = await apiRegister(name, email, password);
-      const u = res?.data?.user;
-
-      if (u) {
-        const fbUser = auth?.currentUser;
-        setCurrentUser({
-          id: u.id,
-          uid: fbUser?.uid || u.id,
-          email: u.email,
-          displayName: u.name || name || email.split('@')[0],
-          photoURL: fbUser?.photoURL || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=256',
-        });
+      if (!registeredUser) {
+        const res = await apiRegister(name, email, password);
+        if (res?.data?.user) {
+          const u = res.data.user;
+          const token = res.data.access_token || res.data.token;
+          if (token) setAuthToken(token);
+          registeredUser = {
+            id: u.id,
+            uid: u.id,
+            email: u.email,
+            displayName: u.name || name || email.split('@')[0],
+            photoURL: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=256',
+          };
+        }
       }
+
+      if (!registeredUser) {
+        throw new Error('Registration failed. Please check your credentials.');
+      }
+
+      setCurrentUser(registeredUser);
+      setCachedUser(registeredUser);
       setLoading(false);
       return true;
     } catch (err) {
@@ -144,37 +319,47 @@ export function AuthProvider({ children }) {
       const result = await signInWithGoogle();
       const fbUser = result.user;
 
-      // 2. The Firebase ID token is now available — call backend to register/sync
-      const res = await apiGoogleAuth();
-      const u = res?.data?.user;
-
-      setCurrentUser({
-        id: u?.id || fbUser.uid,
+      let userData = {
+        id: fbUser.uid,
         uid: fbUser.uid,
-        email: u?.email || fbUser.email,
-        displayName: u?.name || fbUser.displayName || fbUser.email?.split('@')[0],
+        email: fbUser.email,
+        displayName: fbUser.displayName || fbUser.email?.split('@')[0],
         photoURL: fbUser.photoURL || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=256',
-      });
+      };
+
+      try {
+        const res = await apiGoogleAuth();
+        if (res?.data?.user) {
+          const u = res.data.user;
+          userData = {
+            id: u.id,
+            uid: fbUser.uid,
+            email: u.email || fbUser.email,
+            displayName: u.name || fbUser.displayName || fbUser.email?.split('@')[0],
+            photoURL: fbUser.photoURL || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=256',
+          };
+        }
+      } catch (backendErr) {
+        console.warn('Backend sync on Google auth returned warning (session remains valid):', backendErr);
+      }
+
+      setCurrentUser(userData);
+      setCachedUser(userData);
       setLoading(false);
       return true;
     } catch (err) {
       setLoading(false);
-      if (
-        err.code === 'auth/popup-closed-by-user' ||
-        err.code === 'auth/cancelled-popup-request'
-      ) {
-        throw new Error('Google Sign-In popup was closed before completing authentication.');
-      }
       throw err;
     }
   };
 
   const logout = async () => {
     removeAuthToken();
+    removeCachedUser();
     try {
       await signOutUser();
     } catch (e) {
-      // ignore
+      console.warn('Sign out warning:', e);
     }
     setCurrentUser(null);
   };

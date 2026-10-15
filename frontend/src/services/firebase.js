@@ -10,6 +10,7 @@ import {
   verifyPasswordResetCode,
   confirmPasswordReset,
   onAuthStateChanged,
+  updateProfile,
 } from 'firebase/auth';
 
 const apiKey = import.meta.env.VITE_FIREBASE_API_KEY;
@@ -71,11 +72,19 @@ export async function signInWithEmail(email, password) {
   return await signInWithEmailAndPassword(auth, email, password);
 }
 
-export async function signUpWithEmail(email, password) {
+export async function signUpWithEmail(email, password, displayName = '') {
   if (!isFirebaseConfigured || !auth) {
     throw new Error('Firebase Auth is not configured.');
   }
-  return await createUserWithEmailAndPassword(auth, email, password);
+  const credential = await createUserWithEmailAndPassword(auth, email, password);
+  if (displayName && displayName.trim() && credential.user) {
+    try {
+      await updateProfile(credential.user, { displayName: displayName.trim() });
+    } catch (profileErr) {
+      console.warn('Failed to update Firebase profile displayName:', profileErr);
+    }
+  }
+  return credential;
 }
 
 export async function signOutUser() {
