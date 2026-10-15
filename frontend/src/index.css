@@ -1,0 +1,171 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@layer base {
+  :root {
+    --bg-dark: #050816;
+    --surface-dark: #0f172a;
+    --primary-purple: #7c3aed;
+    --secondary-blue: #2563eb;
+    --accent-cyan: #06b6d4;
+  }
+}
+
+body {
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* Custom scrollbars */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.2);
+  border-radius: 9999px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.4);
+}
+
+/* Hide scrollbar for Chrome, Safari and Opera */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+@keyframes spin-slow {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-spin-slow {
+  animation: spin-slow 12s linear infinite;
+}
+
+@keyframes robot-float {
+  0%, 100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+.animate-robot-float {
+  animation: robot-float 4s ease-in-out infinite;
+}
+
+@keyframes robot-pulse {
+  0%, 100% {
+    opacity: 0.6;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.08);
+  }
+}
+
+.animate-robot-pulse {
+  animation: robot-pulse 2s ease-in-out infinite;
+}
+
+/* Seasonal Weather Animations */
+@keyframes sunray-rotate {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes sunray-rotate-reverse {
+  0% {
+    transform: rotate(360deg);
+  }
+  100% {
+    transform: rotate(0deg);
+  }
+}
+
+@keyframes sunray-pulse {
+  0%, 100% {
+    opacity: 0.65;
+    filter: brightness(1);
+  }
+  50% {
+    opacity: 0.95;
+    filter: brightness(1.25);
+  }
+}
+
+@keyframes sun-corona-glow {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.7;
+  }
+  50% {
+    transform: scale(1.12);
+    opacity: 0.95;
+  }
+}
+
+@keyframes lightning-flash {
+  0% { opacity: 0; }
+  1% { opacity: 0.9; }
+  3% { opacity: 0.2; }
+  5% { opacity: 1; }
+  8% { opacity: 0.4; }
+  15% { opacity: 0.8; }
+  25% { opacity: 0; }
+  100% { opacity: 0; }
+}
+
+@keyframes cloud-drift-left {
+  0% {
+    transform: translateX(-5%);
+  }
+  50% {
+    transform: translateX(5%);
+  }
+  100% {
+    transform: translateX(-5%);
+  }
+}
+
+.animate-sunray-rotate {
+  animation: sunray-rotate 60s linear infinite;
+}
+
+.animate-sunray-rotate-reverse {
+  animation: sunray-rotate-reverse 85s linear infinite;
+}
+
+.animate-sunray-pulse {
+  animation: sunray-pulse 6s ease-in-out infinite;
+}
+
+.animate-sun-corona {
+  animation: sun-corona-glow 4s ease-in-out infinite;
+}
+
+.animate-cloud-drift {
+  animation: cloud-drift-left 25s ease-in-out infinite;
+}
+
