@@ -266,3 +266,31 @@ export async function apiSummarizeDocument(fileContent, fileName = 'document', f
     body: JSON.stringify({ fileContent, fileName, fileType }),
   });
 }
+
+// --- Knowledge Base & Qdrant Vector Pipeline ---
+export async function apiGetKnowledgeStatus() {
+  return await fetchAPI('/api/knowledge/status');
+}
+
+export async function apiIngestDocument(fileContent, fileName = 'document', fileType = 'text', metadata = {}, reindex = false) {
+  return await fetchAPI('/api/knowledge/ingest-document', {
+    method: 'POST',
+    body: JSON.stringify({ fileContent, fileName, fileType, metadata, reindex }),
+  });
+}
+
+export async function apiSearchKnowledge(query, category = null, limit = 5) {
+  let url = `/api/knowledge/search?q=${encodeURIComponent(query)}&limit=${limit}`;
+  if (category) url += `&category=${encodeURIComponent(category)}`;
+  return await fetchAPI(url);
+}
+
+export async function apiGetKnowledgeList() {
+  return await fetchAPI('/api/knowledge');
+}
+
+export async function apiDeleteKnowledgeDoc(docId) {
+  return await fetchAPI(`/api/knowledge/documents/${docId}`, {
+    method: 'DELETE',
+  });
+}

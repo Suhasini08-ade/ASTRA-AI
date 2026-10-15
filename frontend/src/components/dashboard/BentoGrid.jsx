@@ -91,7 +91,7 @@ export default function BentoGrid() {
   };
 
   return (
-    <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 pb-12">
+    <section className="grid grid-cols-1 md:grid-cols-3 gap-6 pb-12">
       {/* 1. Tasks Card */}
       <div className="bg-surface dark:bg-slate-800 rounded-2xl border border-outline-variant/40 dark:border-slate-700 p-6 shadow-sm flex flex-col h-[340px] transition-colors">
         <div className="flex items-center justify-between mb-4">
@@ -213,41 +213,6 @@ export default function BentoGrid() {
               <p className="font-label text-xs font-semibold text-on-surface dark:text-slate-200">{f.tempHigh}°</p>
             </div>
           ))}
-        </div>
-      </div>
-
-      {/* 4. Recent Activity Card */}
-      <div className="bg-surface dark:bg-slate-800 rounded-2xl border border-outline-variant/40 dark:border-slate-700 p-6 shadow-sm flex flex-col h-[340px] transition-colors">
-        <h3 className="font-headline text-lg font-bold text-on-surface dark:text-slate-100 mb-4">
-          System Overview
-        </h3>
-        <div className="flex-1 flex flex-col gap-4 overflow-y-auto">
-          <div className="flex gap-3 items-start">
-            <div className="w-8 h-8 rounded-full bg-blue-100 dark:bg-blue-950/60 flex items-center justify-center flex-shrink-0 text-primary dark:text-blue-400">
-              <span className="material-symbols-outlined text-base">hub</span>
-            </div>
-            <div>
-              <p className="font-label text-xs text-on-surface dark:text-slate-200">
-                Connected to <strong className="font-semibold">FastAPI Backend</strong>
-              </p>
-              <p className="font-label text-[10px] text-on-surface-variant dark:text-slate-400 mt-0.5">
-                Live MongoDB Atlas Integration
-              </p>
-            </div>
-          </div>
-          <div className="flex gap-3 items-start">
-            <div className="w-8 h-8 rounded-full bg-purple-100 dark:bg-purple-950/60 flex items-center justify-center flex-shrink-0 text-purple-600 dark:text-purple-400">
-              <span className="material-symbols-outlined text-base">smart_toy</span>
-            </div>
-            <div>
-              <p className="font-label text-xs text-on-surface dark:text-slate-200">
-                AI Provider: <strong className="font-semibold">Gemini / Router Active</strong>
-              </p>
-              <p className="font-label text-[10px] text-on-surface-variant dark:text-slate-400 mt-0.5">
-                Multi-tool Agent Ready
-              </p>
-            </div>
-          </div>
         </div>
       </div>
     </section>

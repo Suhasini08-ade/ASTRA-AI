@@ -9,7 +9,7 @@ import base64
 import io
 import logging
 import re
-from typing import Union
+from typing import Optional, Union
 
 import docx
 import pypdf
@@ -140,7 +140,7 @@ def extract_text_from_document(
     content: Union[str, bytes],
     file_name: str = "document",
     file_type: str = "text",
-    max_chars: int = MAX_DOCUMENT_CHARS,
+    max_chars: Optional[int] = MAX_DOCUMENT_CHARS,
 ) -> str:
     """
     Safely extract plain text from an uploaded document (PDF, DOCX, TXT, MD).
@@ -148,8 +148,8 @@ def extract_text_from_document(
     :param content: String (plain text, base64, or data URI) or raw bytes.
     :param file_name: Original file name.
     :param file_type: Declared file type or extension (e.g. 'pdf', 'docx', 'txt').
-    :param max_chars: Maximum character limit for AI safety.
-    :return: Sanitized plain text ready for summarization.
+    :param max_chars: Maximum character limit for AI safety (or None for unlimited extraction).
+    :return: Sanitized plain text ready for summarization or knowledge ingestion.
     """
     if not content:
         raise DocumentExtractionError("Document content is empty.", file_name)
@@ -198,8 +198,8 @@ def extract_text_from_document(
                 file_name,
             )
 
-    # Apply length cap for AI token and context safety
-    if len(cleaned) > max_chars:
+    # Apply length cap if specified (e.g. for AI token and context safety)
+    if max_chars is not None and len(cleaned) > max_chars:
         logger.info(
             "Document '%s' length (%d chars) exceeds max limit (%d). Truncating safely.",
             file_name,

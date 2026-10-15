@@ -14,7 +14,7 @@ Endpoints:
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from pydantic import BaseModel, Field
 
@@ -45,6 +45,14 @@ class DocumentIngestRequest(BaseModel):
     fileType: str = Field(default="text")
     fileUrl: Optional[str] = None
     metadata: Optional[dict] = None
+    reindex: bool = False
+
+
+@router.get("/status")
+async def get_knowledge_status():
+    """Verify live Qdrant Cloud connection, collection configuration, and vector point count."""
+    info = knowledge_service.get_collection_info()
+    return success_response(data=info, message="Qdrant status fetched successfully.")
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
@@ -75,7 +83,7 @@ async def search_knowledge(
     q: str = Query(..., min_length=1, description="Semantic search query"),
     category: Optional[str] = Query(None, description="Optional category filter"),
     limit: int = Query(5, ge=1, le=20, description="Max results"),
-    score_threshold: float = Query(0.35, ge=0.0, le=1.0, description="Minimum similarity score"),
+    score_threshold: float = Query(0.30, ge=0.0, le=1.0, description="Minimum similarity score"),
     current_user: dict = Depends(get_current_user),
 ):
     """Perform semantic vector search in Qdrant restricted strictly to the user's data."""
@@ -102,7 +110,7 @@ async def ingest_document(
 ):
     """
     Ingest, extract, chunk, embed, and store a document (PDF, Word, or Text).
-    Stores vectors in Qdrant and reference record in MongoDB Atlas.
+    Stores 384-dimensional dense vectors in Qdrant and reference record in MongoDB Atlas.
     """
     user_id = str(current_user["_id"])
     try:
@@ -110,6 +118,7 @@ async def ingest_document(
             content=body.fileContent,
             file_name=body.fileName,
             file_type=body.fileType,
+            max_chars=None,
         )
     except DocumentExtractionError as exc:
         raise HTTPException(status_code=400, detail=f"Text extraction failed: {exc.message}")
@@ -123,10 +132,58 @@ async def ingest_document(
             file_type=body.fileType,
             file_url=body.fileUrl,
             metadata=body.metadata,
+            reindex=body.reindex,
         )
-        return success_response(data=ingest_res, message="Document indexed successfully.")
+        return success_response(data=ingest_res, message="Document indexed successfully into Qdrant.")
     except Exception as exc:
         logger.error("Document ingestion failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.post("/upload", status_code=status.HTTP_201_CREATED)
+async def upload_document(
+    file: UploadFile = File(...),
+    title: Optional[str] = Form(None),
+    category: str = Form("document"),
+    reindex: bool = Form(False),
+    current_user: dict = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_database),
+):
+    """
+    Direct multipart/form-data upload and ingestion for PDFs and documents.
+    Extracts text, generates 384-d embeddings, and stores in Qdrant + MongoDB.
+    """
+    user_id = str(current_user["_id"])
+    file_bytes = await file.read()
+    if not file_bytes:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+
+    file_name = file.filename or "uploaded_document"
+    file_ext = (file_name.split(".")[-1] if "." in file_name else "pdf").lower()
+
+    try:
+        extracted = extract_text_from_document(
+            content=file_bytes,
+            file_name=file_name,
+            file_type=file_ext,
+            max_chars=None,
+        )
+    except DocumentExtractionError as exc:
+        raise HTTPException(status_code=400, detail=f"Text extraction failed: {exc.message}")
+
+    try:
+        ingest_res = await knowledge_service.ingest_document(
+            db=db,
+            user_id=user_id,
+            text_content=extracted,
+            file_name=file_name,
+            file_type=file_ext,
+            metadata={"title": title or file_name, "category": category},
+            reindex=reindex,
+        )
+        return success_response(data=ingest_res, message="Document uploaded and indexed successfully.")
+    except Exception as exc:
+        logger.error("Document upload ingestion failed: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
 
 

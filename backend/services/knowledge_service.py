@@ -291,20 +291,21 @@ class KnowledgeService:
 
     async def ingest_document(
         self,
-        db: AsyncIOMotorDatabase,
+        db: Optional[AsyncIOMotorDatabase],
         user_id: str,
         text_content: str,
         file_name: str,
         file_type: str = "document",
         file_url: Optional[str] = None,
         metadata: Optional[dict[str, Any]] = None,
+        reindex: bool = False,
     ) -> dict[str, Any]:
         """
         Ingest an entire document (e.g. PDF, Word, Markdown, or text) into knowledge base:
         1. Breaks document into overlapping chunks.
-        2. Computes embeddings for all chunks in batch.
-        3. Saves chunks to Qdrant with user_id and document reference.
-        4. Saves document record and chunk references in MongoDB Atlas.
+        2. Computes embeddings for all chunks in batch using 384-dimensional sentence-transformers.
+        3. Saves chunks to Qdrant with user_id, document reference, text, source, title, and metadata.
+        4. Saves/updates document record and chunk references in MongoDB Atlas.
         """
         if not user_id:
             raise ValueError("user_id is required for document ingestion.")
@@ -319,25 +320,51 @@ class KnowledgeService:
             raise ValueError("Could not extract chunks from document.")
 
         now = datetime.now(timezone.utc)
+        meta = dict(metadata or {})
+        doc_title = meta.get("title") or file_name
+        doc_category = meta.get("category", "document")
 
-        # Check if identical document was already ingested by this user
-        existing_doc = await db.documents.find_one({
-            "user_id": user_id,
-            "content_hash": doc_hash,
-        })
-        if existing_doc:
-            logger.info("Document '%s' already indexed for user %s.", file_name, user_id)
-            return {
-                "id": str(existing_doc["_id"]),
-                "file_name": existing_doc.get("file_name", file_name),
-                "chunks_count": existing_doc.get("chunks_count", len(chunks)),
-                "status": "already_indexed",
-            }
+        # Check if document already exists for this user
+        existing_doc = None
+        if db is not None:
+            existing_doc = await db.documents.find_one({
+                "user_id": user_id,
+                "content_hash": doc_hash,
+            })
 
-        # Batch embed all chunks
+        if existing_doc and not reindex:
+            # Check if Qdrant actually contains points for this document
+            first_chunk = (existing_doc.get("chunks") or [{}])[0]
+            first_qdrant_id = first_chunk.get("qdrant_id")
+            points_exist = False
+            if first_qdrant_id:
+                try:
+                    client = self._get_qdrant()
+                    pts = client.retrieve(
+                        collection_name=self.collection_name,
+                        ids=[first_qdrant_id],
+                        with_payload=False,
+                        with_vectors=False,
+                    )
+                    points_exist = bool(pts)
+                except Exception:
+                    points_exist = False
+
+            if points_exist:
+                logger.info("Document '%s' already indexed for user %s and present in Qdrant.", file_name, user_id)
+                return {
+                    "id": str(existing_doc["_id"]),
+                    "file_name": existing_doc.get("file_name", file_name),
+                    "chunks_count": existing_doc.get("chunks_count", len(chunks)),
+                    "points_count": len(chunks),
+                    "status": "already_indexed",
+                }
+            logger.info("Document '%s' found in MongoDB but points missing in Qdrant; indexing now.", file_name)
+
+        # Batch embed all chunks (384 dimensions)
         chunk_embeddings = generate_embeddings_batch(chunks, batch_size=32)
 
-        # Prepare Qdrant points
+        # Prepare Qdrant points with complete, useful payloads
         points: list[qmodels.PointStruct] = []
         chunk_records: list[dict[str, Any]] = []
 
@@ -349,16 +376,19 @@ class KnowledgeService:
                 "user_id": user_id,
                 "document_hash": doc_hash,
                 "file_name": file_name,
+                "source": file_name,
+                "title": f"{doc_title} (part {idx + 1}/{len(chunks)})" if len(chunks) > 1 else doc_title,
                 "file_type": file_type,
                 "chunk_index": idx,
                 "total_chunks": len(chunks),
                 "text": chunk_text_str,
-                "category": "document",
-                "source": file_name,
+                "category": doc_category,
                 "created_at": now.isoformat(),
             }
-            if metadata:
-                payload.update(metadata)
+            if meta:
+                for k, v in meta.items():
+                    if k not in payload:
+                        payload[k] = v
 
             points.append(
                 qmodels.PointStruct(
@@ -374,39 +404,87 @@ class KnowledgeService:
                 "text_snippet": chunk_text_str[:120],
             })
 
-        # Upsert batch in Qdrant
+        # Upsert points into Qdrant Cloud
         try:
             client = self._get_qdrant()
             client.upsert(
                 collection_name=self.collection_name,
                 points=points,
             )
+            logger.info("Successfully upserted %d vector points into Qdrant '%s'", len(points), self.collection_name)
         except Exception as exc:
             logger.error("Failed to index document chunks into Qdrant: %s", exc)
             raise RuntimeError(f"Qdrant document indexing failed: {exc}")
 
-        # Store document record in MongoDB
-        doc_record = {
-            "user_id": user_id,
-            "file_name": file_name,
-            "file_type": file_type,
-            "file_url": file_url,
-            "content_hash": doc_hash,
-            "character_count": len(cleaned),
-            "chunks_count": len(chunks),
-            "chunks": chunk_records,
-            "metadata": metadata or {},
-            "created_at": now,
-            "updated_at": now,
-        }
-        inserted = await db.documents.insert_one(doc_record)
+        # Store or update authoritative document record in MongoDB
+        doc_id = None
+        if db is not None:
+            if existing_doc:
+                await db.documents.update_one(
+                    {"_id": existing_doc["_id"]},
+                    {"$set": {
+                        "chunks_count": len(chunks),
+                        "chunks": chunk_records,
+                        "character_count": len(cleaned),
+                        "updated_at": now,
+                    }}
+                )
+                doc_id = str(existing_doc["_id"])
+            else:
+                doc_record = {
+                    "user_id": user_id,
+                    "file_name": file_name,
+                    "file_type": file_type,
+                    "file_url": file_url,
+                    "content_hash": doc_hash,
+                    "character_count": len(cleaned),
+                    "chunks_count": len(chunks),
+                    "chunks": chunk_records,
+                    "metadata": meta,
+                    "created_at": now,
+                    "updated_at": now,
+                }
+                inserted = await db.documents.insert_one(doc_record)
+                doc_id = str(inserted.inserted_id)
+        else:
+            doc_id = f"doc_{doc_hash[:12]}"
 
         return {
-            "id": str(inserted.inserted_id),
+            "id": doc_id,
             "file_name": file_name,
             "chunks_count": len(chunks),
+            "points_count": len(points),
             "status": "indexed",
         }
+
+    def get_collection_info(self) -> dict[str, Any]:
+        """Fetch live Qdrant collection status, points count, and vector config."""
+        try:
+            client = self._get_qdrant()
+            info = client.get_collection(self.collection_name)
+            vector_size = None
+            distance = None
+            if hasattr(info.config.params, "vectors"):
+                vparams = info.config.params.vectors
+                if hasattr(vparams, "size"):
+                    vector_size = vparams.size
+                    distance = str(vparams.distance)
+            return {
+                "collection_name": self.collection_name,
+                "status": str(info.status),
+                "points_count": info.points_count,
+                "indexed_vectors_count": getattr(info, "indexed_vectors_count", 0),
+                "vector_size": vector_size,
+                "distance": distance,
+            }
+        except Exception as exc:
+            logger.error("Failed to retrieve Qdrant collection info: %s", exc)
+            return {
+                "collection_name": self.collection_name,
+                "status": "error",
+                "error": str(exc),
+                "points_count": 0,
+            }
 
     async def delete_knowledge_item(
         self,

@@ -55,15 +55,14 @@ class AIService:
         try:
             return await self._provider.chat_completion(messages=messages, tools=tools)
         except AIProviderConfigurationError as exc:
-            logger.error("AI provider configuration error (check .env API keys/models): %s", exc)
-            return AIProviderResponse(
-                content="I'm having trouble connecting to the AI service. Please check your API keys and model settings in the backend configuration."
-            )
+            logger.warning("AI provider configuration error: %s", exc)
+            return AIProviderResponse(content=str(exc))
         except (AIProviderError, Exception) as exc:
-            logger.warning("AI generation failed after attempting all configured providers: %s", exc)
+            logger.warning("AI generation failed after attempting configured providers: %s", exc)
             return AIProviderResponse(
-                content="I'm temporarily unavailable. Please try again in a moment."
+                content="AI services are temporarily unavailable. Please try again later."
             )
+
 
 
     async def send_message(
@@ -158,8 +157,8 @@ class AIService:
             matched_knowledge = await knowledge_service.search_knowledge(
                 user_id=user_id,
                 query=message.strip(),
-                limit=3,
-                score_threshold=0.45,
+                limit=5,
+                score_threshold=0.30,
             )
             if matched_knowledge:
                 snippets = "\n".join(
