@@ -292,12 +292,16 @@ async def get_settings_prefs(
     user_id = current_user["_id"]
     query = {"$or": [{"_id": ObjectId(user_id)}, {"_id": user_id}]} if ObjectId.is_valid(user_id) else {"_id": user_id}
     user = await db.users.find_one(query)
-    settings = (user or {}).get("settings", {
+    default_settings = {
         "notifications": {"tasks": True, "reminders": True, "aiAlerts": False},
         "aiProvider": "gemini",
         "voiceSpeed": "1.0",
+        "voiceGender": "female",
+        "voiceMuted": False,
         "theme": "dark",
-    })
+    }
+    saved_settings = (user or {}).get("settings") or {}
+    settings = {**default_settings, **saved_settings}
     return success_response(data=settings)
 
 

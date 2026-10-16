@@ -13,9 +13,10 @@ Features:
 
 import hashlib
 import logging
-from typing import List, Union
+from typing import TYPE_CHECKING, Any, List, Union
 
-from sentence_transformers import SentenceTransformer
+if TYPE_CHECKING:
+    from sentence_transformers import SentenceTransformer
 
 logger = logging.getLogger(__name__)
 
@@ -23,18 +24,19 @@ DEFAULT_MODEL_NAME = "all-MiniLM-L6-v2"
 EXPECTED_EMBEDDING_DIM = 384
 
 # Global singleton instance for cached model
-_model_instance: SentenceTransformer | None = None
+_model_instance: Any = None
 # Simple in-memory cache to avoid recomputing identical strings: {hash_key: [float, ...]}
 _embedding_cache: dict[str, list[float]] = {}
 
 
-def get_embedding_model(model_name: str = DEFAULT_MODEL_NAME) -> SentenceTransformer:
+def get_embedding_model(model_name: str = DEFAULT_MODEL_NAME):
     """
     Get or initialize the cached SentenceTransformer model instance.
     Loads model lazily on first access.
     """
     global _model_instance
     if _model_instance is None:
+        from sentence_transformers import SentenceTransformer
         logger.info("Loading embedding model '%s'...", model_name)
         _model_instance = SentenceTransformer(model_name)
         logger.info("Embedding model '%s' loaded successfully.", model_name)

@@ -31,4 +31,6 @@ async def process_command(
         return success_response(data={"reply": "Please provide a command or question."}, message="No command provided.")
 
     reply = await voice_service.process_voice_input(db, current_user["_id"], query_text)
-    return success_response(data={"reply": reply}, message="Voice command processed.")
+    if isinstance(reply, dict):
+        return success_response(data=reply, message="Voice command processed.")
+    return success_response(data={"reply": reply, "spoken_summary": reply}, message="Voice command processed.")

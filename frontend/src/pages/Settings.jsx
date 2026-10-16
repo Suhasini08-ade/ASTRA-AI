@@ -4,6 +4,13 @@ import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import ThemeSwitcher from '../components/ThemeSwitcher';
 import { apiGetSettings, apiUpdateSettings } from '../services/api';
+import {
+  getVoiceGender,
+  setVoiceGender,
+  isVoiceMuted,
+  setVoiceMuted,
+  setVoiceSpeed as setVoiceSpeedHelper,
+} from '../services/voiceService';
 import { 
   Settings as LuSettings, 
   Sun as LuSun, 
@@ -30,6 +37,8 @@ export default function Settings() {
 
   const [aiProvider, setAiProvider] = useState('gemini');
   const [voiceSpeed, setVoiceSpeed] = useState('1.0');
+  const [voiceGender, setVoiceGenderState] = useState(() => getVoiceGender());
+  const [voiceMuted, setVoiceMutedState] = useState(() => isVoiceMuted());
   const [savedStatus, setSavedStatus] = useState('');
 
   useEffect(() => {
@@ -39,21 +48,52 @@ export default function Settings() {
         if (s) {
           if (s.notifications) setNotifications(s.notifications);
           if (s.aiProvider) setAiProvider(s.aiProvider);
-          if (s.voiceSpeed) setVoiceSpeed(s.voiceSpeed);
+          if (s.voiceSpeed) {
+            setVoiceSpeed(s.voiceSpeed);
+            setVoiceSpeedHelper(s.voiceSpeed);
+          }
+          if (s.voiceGender) {
+            setVoiceGenderState(s.voiceGender);
+            setVoiceGender(s.voiceGender);
+          }
+          if (s.voiceMuted !== undefined) {
+            setVoiceMutedState(s.voiceMuted);
+            setVoiceMuted(s.voiceMuted);
+          }
         }
       } catch (err) {
         console.warn('Could not load settings from backend:', err);
       }
     }
     loadSettings();
+
+    const handleVoiceChange = (e) => {
+      if (e.detail?.gender) setVoiceGenderState(e.detail.gender);
+    };
+    const handleMuteChange = (e) => {
+      if (e.detail?.muted !== undefined) setVoiceMutedState(e.detail.muted);
+    };
+
+    window.addEventListener('astra_voice_gender_changed', handleVoiceChange);
+    window.addEventListener('astra_voice_muted_changed', handleMuteChange);
+
+    return () => {
+      window.removeEventListener('astra_voice_gender_changed', handleVoiceChange);
+      window.removeEventListener('astra_voice_muted_changed', handleMuteChange);
+    };
   }, []);
 
   const handleSave = async () => {
     try {
+      setVoiceGender(voiceGender);
+      setVoiceMuted(voiceMuted);
+      setVoiceSpeedHelper(voiceSpeed);
       await apiUpdateSettings({
         notifications,
         aiProvider,
         voiceSpeed,
+        voiceGender,
+        voiceMuted,
       });
       setSavedStatus('Settings saved successfully!');
     } catch (err) {
@@ -169,10 +209,11 @@ export default function Settings() {
           <div>
             <label className="block text-slate-500 dark:text-slate-400 mb-1 font-semibold">Voice Gender & Accent</label>
             <select
-              value={localStorage.getItem('astra_voice_gender') || localStorage.getItem('jarves_voice_gender') || 'female'}
+              value={voiceGender}
               onChange={(e) => {
-                localStorage.setItem('astra_voice_gender', e.target.value);
-                localStorage.setItem('jarves_voice_gender', e.target.value);
+                const nextVal = e.target.value;
+                setVoiceGenderState(nextVal);
+                setVoiceGender(nextVal);
               }}
               className="w-full p-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100"
             >
@@ -190,10 +231,11 @@ export default function Settings() {
           </div>
           <input
             type="checkbox"
-            defaultChecked={(localStorage.getItem('astra_voice_muted') || localStorage.getItem('jarves_voice_muted')) === 'true'}
+            checked={voiceMuted}
             onChange={(e) => {
-              localStorage.setItem('astra_voice_muted', e.target.checked ? 'true' : 'false');
-              localStorage.setItem('jarves_voice_muted', e.target.checked ? 'true' : 'false');
+              const nextMuted = e.target.checked;
+              setVoiceMutedState(nextMuted);
+              setVoiceMuted(nextMuted);
             }}
             className="w-4 h-4 accent-purple-600 rounded"
           />

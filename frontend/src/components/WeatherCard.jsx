@@ -21,7 +21,11 @@ import {
   Sunrise as LuSunrise,
   Sunset as LuSunset,
   Sparkles as LuSparkles,
-  Sliders as LuSliders
+  Sliders as LuSliders,
+  MapPin as LuMapPin,
+  AlertCircle as LuAlertCircle,
+  X as LuX,
+  RefreshCw as LuRefreshCw
 } from 'lucide-react';
 
 export default function WeatherCard({ 
@@ -34,17 +38,24 @@ export default function WeatherCard({
   const [cityInput, setCityInput] = useState('Kolhapur');
   const [weather, setWeather] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [isDetectingLocation, setIsDetectingLocation] = useState(false);
+  const [errorMessage, setErrorMessage] = useState(null);
   const [isAudioPlaying, setIsAudioPlaying] = useState(false);
   const [selectedForecastIndex, setSelectedForecastIndex] = useState(0);
   const [intensity, setIntensity] = useState('normal');
   const [showAdvancedControls, setShowAdvancedControls] = useState(false);
 
-  const loadWeather = async (city) => {
+  const loadWeather = async (locationOrCoords, lat = null, lon = null) => {
     setLoading(true);
+    setErrorMessage(null);
     try {
-      const data = await fetchWeather(city);
+      const data = await fetchWeather(locationOrCoords, lat, lon);
       setWeather(data);
       setSelectedForecastIndex(0);
+
+      if (data.location) {
+        setCityInput(data.location.split(',')[0].trim());
+      }
 
       // Automatically sync preset to auto and set season to city's natural climate
       if (onSeasonPresetChange) {
@@ -54,7 +65,8 @@ export default function WeatherCard({
         onSeasonChange(data.season);
       }
     } catch (e) {
-      console.error(e);
+      console.error('Weather retrieval error:', e);
+      setErrorMessage(e.message || 'Failed to fetch weather data.');
     } finally {
       setLoading(false);
     }
@@ -88,8 +100,40 @@ export default function WeatherCard({
   const handleSearch = (e) => {
     e.preventDefault();
     if (cityInput.trim()) {
-      loadWeather(cityInput);
+      loadWeather(cityInput.trim());
     }
+  };
+
+  // Browser Geolocation API: Automatic Location Detection
+  const handleUseMyLocation = () => {
+    if (!navigator.geolocation) {
+      setErrorMessage('Geolocation is not supported by your browser.');
+      return;
+    }
+
+    setIsDetectingLocation(true);
+    setErrorMessage(null);
+
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        setIsDetectingLocation(false);
+        const { latitude, longitude } = position.coords;
+        await loadWeather(null, latitude, longitude);
+      },
+      (geoError) => {
+        setIsDetectingLocation(false);
+        let msg = 'Failed to retrieve your location.';
+        if (geoError.code === geoError.PERMISSION_DENIED) {
+          msg = 'Location permission was denied. Please allow location access in your browser settings or search for a city manually.';
+        } else if (geoError.code === geoError.POSITION_UNAVAILABLE) {
+          msg = 'Location information is currently unavailable. Please search for a city manually.';
+        } else if (geoError.code === geoError.TIMEOUT) {
+          msg = 'Location request timed out. Please try again or search manually.';
+        }
+        setErrorMessage(msg);
+      },
+      { timeout: 10000, enableHighAccuracy: true, maximumAge: 60000 }
+    );
   };
 
   const toggleSound = () => {
@@ -106,12 +150,22 @@ export default function WeatherCard({
   const getWeatherIcon = (iconName, className = "w-6 h-6") => {
     switch (iconName) {
       case 'sunny':
+      case '01d':
+      case '01n':
         return <LuSun className={`${className} text-amber-400 animate-spin-slow`} />;
       case 'rain':
+      case '09d':
+      case '09n':
+      case '10d':
+      case '10n':
         return <LuCloudRain className={`${className} text-cyan-400`} />;
       case 'thunderstorm':
+      case '11d':
+      case '11n':
         return <LuCloudLightning className={`${className} text-indigo-400 animate-pulse`} />;
       case 'snow':
+      case '13d':
+      case '13n':
         return <LuSnowflake className={`${className} text-blue-300 animate-pulse`} />;
       case 'wind':
       case 'autumn':
@@ -119,6 +173,15 @@ export default function WeatherCard({
       case 'spring':
         return <LuFlower2 className={`${className} text-pink-400`} />;
       case 'partly-cloudy':
+      case 'cloudy':
+      case '02d':
+      case '02n':
+      case '03d':
+      case '03n':
+      case '04d':
+      case '04n':
+      case '50d':
+      case '50n':
       default:
         return <LuCloudSun className={`${className} text-purple-400`} />;
     }
@@ -150,53 +213,53 @@ export default function WeatherCard({
       case 'thunderstorm':
         return {
           cardBg: 'from-slate-900/90 via-indigo-950/50 to-slate-900/95',
-          border: 'border-indigo-500/50',
+          border: 'border-indigo-500/40',
           shadow: 'shadow-indigo-500/20',
           accentText: 'text-indigo-400',
           badgeBg: 'bg-indigo-500/20 border-indigo-500/30 text-indigo-300',
-          badgeText: '⚡ Thunderstorm Season',
-          glow: 'from-indigo-400/20 to-purple-500/10'
+          badgeText: '⚡ Thunderstorm & Downpour',
+          glow: 'from-indigo-500/20 to-purple-600/10'
         };
       case 'snow':
         return {
           cardBg: 'from-slate-900/90 via-blue-950/40 to-slate-900/95',
           border: 'border-blue-400/40',
-          shadow: 'shadow-blue-400/15',
+          shadow: 'shadow-blue-500/15',
           accentText: 'text-blue-300',
-          badgeBg: 'bg-blue-400/20 border-blue-400/30 text-blue-200',
+          badgeBg: 'bg-blue-500/20 border-blue-400/30 text-blue-200',
           badgeText: '❄️ Winter / Snow Season',
-          glow: 'from-blue-300/15 to-cyan-400/5'
+          glow: 'from-blue-400/15 to-cyan-400/5'
         };
       case 'autumn':
         return {
-          cardBg: 'from-slate-900/90 via-orange-950/40 to-slate-900/95',
-          border: 'border-orange-500/40',
-          shadow: 'shadow-orange-500/15',
-          accentText: 'text-orange-400',
-          badgeBg: 'bg-orange-500/20 border-orange-500/30 text-orange-300',
-          badgeText: '🍂 Autumn / Fall Season',
-          glow: 'from-orange-500/15 to-amber-600/5'
+          cardBg: 'from-slate-900/90 via-amber-950/40 to-slate-900/95',
+          border: 'border-amber-600/40',
+          shadow: 'shadow-amber-600/15',
+          accentText: 'text-amber-500',
+          badgeBg: 'bg-amber-600/20 border-amber-600/30 text-amber-300',
+          badgeText: '🍂 Autumn / Falling Foliage',
+          glow: 'from-amber-500/15 to-orange-500/5'
         };
       case 'spring':
         return {
-          cardBg: 'from-slate-900/90 via-pink-950/40 to-slate-900/95',
+          cardBg: 'from-slate-900/90 via-pink-950/30 to-slate-900/95',
           border: 'border-pink-500/40',
           shadow: 'shadow-pink-500/15',
           accentText: 'text-pink-400',
           badgeBg: 'bg-pink-500/20 border-pink-500/30 text-pink-300',
-          badgeText: '🌸 Spring / Blossom Season',
-          glow: 'from-pink-400/15 to-rose-500/5'
+          badgeText: '🌸 Spring / Sakura Blossom',
+          glow: 'from-pink-400/15 to-rose-400/5'
         };
       case 'cloudy':
       default:
         return {
-          cardBg: 'from-slate-900/90 via-slate-800/40 to-slate-900/95',
-          border: 'border-slate-600/40',
-          shadow: 'shadow-slate-500/10',
-          accentText: 'text-slate-300',
-          badgeBg: 'bg-slate-700/40 border-slate-600/40 text-slate-300',
-          badgeText: '☁️ Overcast / Cloudy',
-          glow: 'from-slate-400/10 to-transparent'
+          cardBg: 'from-slate-900/90 via-slate-800/50 to-slate-900/95',
+          border: 'border-purple-500/30',
+          shadow: 'shadow-purple-500/10',
+          accentText: 'text-purple-400',
+          badgeBg: 'bg-purple-500/20 border-purple-500/30 text-purple-300',
+          badgeText: '☁️ Overcast / Misty Clouds',
+          glow: 'from-purple-500/10 to-cyan-500/5'
         };
     }
   };
@@ -215,7 +278,7 @@ export default function WeatherCard({
       <div className="relative z-20 space-y-6">
         
         {/* Top Header: Title, Active Season Pill, and Search Form */}
-        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 pb-4 border-b border-white/10">
+        <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 pb-4 border-b border-white/10">
           <div>
             <div className="flex flex-wrap items-center gap-2.5">
               <h2 className="text-xl sm:text-2xl font-black tracking-tight flex items-center gap-2.5">
@@ -234,11 +297,33 @@ export default function WeatherCard({
             </p>
           </div>
 
-          {/* Quick Actions: Sound & Search */}
-          <div className="flex items-center gap-2 w-full md:w-auto">
+          {/* Quick Actions: Geolocation, Sound, Settings, and Search */}
+          <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto">
+            {/* Automatic Location Detection Button */}
+            <button
+              id="weather-use-my-location-btn"
+              type="button"
+              onClick={handleUseMyLocation}
+              disabled={isDetectingLocation || loading}
+              className={`px-3 py-2 rounded-xl border transition-all flex items-center gap-1.5 text-xs font-bold shrink-0 ${
+                isDetectingLocation
+                  ? 'bg-cyan-500/30 border-cyan-400 text-cyan-200 animate-pulse'
+                  : 'bg-slate-800/80 hover:bg-slate-700/80 border-slate-700/80 hover:border-cyan-400/50 text-cyan-300 hover:text-white shadow-sm'
+              }`}
+              title="Use browser Geolocation to fetch weather at your current coordinates"
+            >
+              {isDetectingLocation ? (
+                <LuRefreshCw className="w-4 h-4 text-cyan-400 animate-spin" />
+              ) : (
+                <LuMapPin className="w-4 h-4 text-cyan-400" />
+              )}
+              <span>{isDetectingLocation ? 'Locating...' : 'Use My Location'}</span>
+            </button>
+
             {/* Ambient Sound Toggle */}
             <button
               id="weather-sound-toggle-btn"
+              type="button"
               onClick={toggleSound}
               className={`p-2.5 rounded-xl border transition-all flex items-center gap-1.5 text-xs font-semibold ${
                 isAudioPlaying 
@@ -254,6 +339,7 @@ export default function WeatherCard({
             {/* Advanced Controls Toggle */}
             <button
               id="weather-settings-toggle-btn"
+              type="button"
               onClick={() => setShowAdvancedControls(!showAdvancedControls)}
               className={`p-2.5 rounded-xl border transition-all text-xs ${
                 showAdvancedControls
@@ -265,20 +351,39 @@ export default function WeatherCard({
               <LuSliders className="w-4 h-4" />
             </button>
 
-            {/* City Search */}
-            <form onSubmit={handleSearch} className="relative flex-1 md:w-56">
+            {/* City Search Form */}
+            <form onSubmit={handleSearch} className="relative flex-1 sm:w-56">
               <input
                 id="weather-city-search-input"
                 type="text"
                 value={cityInput}
                 onChange={(e) => setCityInput(e.target.value)}
-                placeholder="Search city (e.g. Dubai, Mumbai)..."
+                placeholder="Search city (e.g. Dubai, London)..."
+                disabled={loading}
                 className="w-full bg-slate-800/80 border border-slate-700/90 rounded-xl py-2 pl-9 pr-4 text-xs text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-cyan-400/50"
               />
               <LuSearch className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
             </form>
           </div>
         </div>
+
+        {/* Error Alert Banner */}
+        {errorMessage && (
+          <div className="p-3.5 rounded-2xl bg-rose-500/20 border border-rose-500/40 text-rose-200 text-xs flex items-center justify-between gap-3 shadow-lg backdrop-blur-md">
+            <div className="flex items-center gap-2">
+              <LuAlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+              <span>{errorMessage}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setErrorMessage(null)}
+              className="p-1 rounded-lg hover:bg-rose-500/30 text-rose-300 hover:text-white transition-colors"
+              title="Dismiss error message"
+            >
+              <LuX className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
 
         {/* Season Selector Toolbar: Easily test/switch between seasons */}
         <div>
@@ -348,7 +453,7 @@ export default function WeatherCard({
 
         {/* Popular Cities Quick Bar */}
         <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar text-xs">
-          <span className="text-slate-500 text-[11px] font-semibold shrink-0">Popular Climates:</span>
+          <span className="text-slate-500 text-[11px] font-semibold shrink-0">Popular Cities:</span>
           {POPULAR_CITIES.map((c) => (
             <button
               key={c.name}
@@ -357,7 +462,8 @@ export default function WeatherCard({
                 setCityInput(c.name);
                 loadWeather(c.name);
               }}
-              className={`px-3 py-1 rounded-xl shrink-0 font-medium transition-all flex items-center gap-1.5 cursor-pointer ${
+              disabled={loading}
+              className={`px-3 py-1 rounded-xl shrink-0 font-medium transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50 ${
                 weather?.location.toLowerCase().includes(c.name.toLowerCase())
                   ? 'bg-slate-700 border border-slate-600 text-white shadow-sm'
                   : 'bg-slate-800/50 hover:bg-slate-800 text-slate-400 hover:text-slate-200'
@@ -369,13 +475,38 @@ export default function WeatherCard({
           ))}
         </div>
 
-        {loading || !weather ? (
+        {/* Content Area: Loading / Error / Weather Display */}
+        {loading && !weather ? (
           <div className="py-20 text-center text-slate-400 text-xs animate-pulse flex flex-col items-center justify-center gap-3">
             <div className="w-10 h-10 rounded-full border-2 border-cyan-400 border-t-transparent animate-spin" />
-            <span>Harmonizing atmospheric conditions & real-time weather data...</span>
+            <span>
+              {isDetectingLocation 
+                ? 'Detecting your coordinates via browser geolocation...' 
+                : `Harmonizing atmospheric conditions for ${cityInput || 'selected location'}...`}
+            </span>
+          </div>
+        ) : !weather ? (
+          <div className="py-16 text-center text-slate-400 text-xs flex flex-col items-center justify-center gap-3 bg-slate-900/40 rounded-2xl border border-white/10 p-6">
+            <LuAlertCircle className="w-8 h-8 text-rose-400" />
+            <p className="text-sm font-bold text-slate-200">Unable to display weather data</p>
+            <p className="text-xs text-slate-400 max-w-md">{errorMessage || 'Please try searching for another city or use automatic location detection.'}</p>
+            <button
+              onClick={() => loadWeather('Kolhapur')}
+              className="mt-2 px-4 py-2 rounded-xl bg-gradient-to-r from-purple-600 to-cyan-500 text-white font-bold text-xs"
+            >
+              Reset to Default City
+            </button>
           </div>
         ) : (
-          <div className="space-y-6">
+          <div className="space-y-6 relative">
+            {/* Subtle floating spinner if refreshing weather in background */}
+            {loading && (
+              <div className="absolute top-2 right-2 z-30 flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-950/80 border border-cyan-400/40 text-[10px] text-cyan-300 shadow-md">
+                <LuRefreshCw className="w-3 h-3 animate-spin" />
+                <span>Updating...</span>
+              </div>
+            )}
+
             {/* Primary Hero Weather Display */}
             <div className="p-6 sm:p-7 rounded-2xl bg-slate-900/50 border border-white/10 backdrop-blur-md flex flex-col md:flex-row items-start md:items-center justify-between gap-6 relative overflow-hidden">
               
@@ -393,7 +524,7 @@ export default function WeatherCard({
                     {weather.temperature}°C
                   </span>
                   <span className="text-sm font-semibold text-slate-300">
-                    RealFeel {weather.temperature + (effectiveSeason === 'sunny' ? 2 : -2)}°C
+                    RealFeel {weather.feelsLike}°C
                   </span>
                 </div>
 
@@ -413,7 +544,7 @@ export default function WeatherCard({
                     <span className="text-cyan-400">↓</span> Low: <strong className="text-white">{weather.low}°C</strong>
                   </span>
                   <span className="flex items-center gap-1">
-                    <LuCompass className="w-3.5 h-3.5 text-purple-400" /> Wind: <strong className="text-white">{weather.windSpeed} km/h WNW</strong>
+                    <LuCompass className="w-3.5 h-3.5 text-purple-400" /> Wind: <strong className="text-white">{weather.windSpeed} m/s</strong>
                   </span>
                 </div>
               </div>
@@ -454,7 +585,7 @@ export default function WeatherCard({
                 </div>
                 <div>
                   <p className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider">Wind Speed</p>
-                  <p className="text-sm font-extrabold text-white">{weather.windSpeed} km/h</p>
+                  <p className="text-sm font-extrabold text-white">{weather.windSpeed} m/s</p>
                   <span className="text-[10px] text-purple-400 font-medium">Gentle Breeze</span>
                 </div>
               </div>
@@ -478,8 +609,8 @@ export default function WeatherCard({
                 </div>
                 <div>
                   <p className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider">Solar Cycle</p>
-                  <p className="text-sm font-extrabold text-white">06:12 - 18:48</p>
-                  <span className="text-[10px] text-rose-400 font-medium">12h 36m Daylight</span>
+                  <p className="text-sm font-extrabold text-white">{weather.sunrise} - {weather.sunset}</p>
+                  <span className="text-[10px] text-rose-400 font-medium">Daylight Cycle</span>
                 </div>
               </div>
             </div>

@@ -221,6 +221,10 @@ async def list_knowledge(
             "file_type": d.get("file_type", ""),
             "chunks_count": d.get("chunks_count", 0),
             "character_count": d.get("character_count", 0),
+            "content_hash": d.get("content_hash", ""),
+            "summary": d.get("summary"),
+            "text_preview": d.get("text_preview", ""),
+            "status": "indexed",
             "created_at": d.get("created_at").isoformat() if d.get("created_at") else None,
         })
 

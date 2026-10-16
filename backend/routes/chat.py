@@ -17,9 +17,12 @@ router = APIRouter(prefix="/api/chat", tags=["AI Chat"])
 
 
 class ChatMessage(BaseModel):
-    """Schema for sending a chat message."""
-    message: str = Field(..., min_length=1, max_length=2000)
+    """Schema for sending a chat message, optionally with an attached document."""
+    message: str = Field(..., min_length=1, max_length=5000)
     conversation_id: str | None = Field(default=None, max_length=100)
+    document_id: str | None = Field(default=None, max_length=100)
+    document_hash: str | None = Field(default=None, max_length=100)
+    file_name: str | None = Field(default=None, max_length=255)
 
 
 @router.post("")
@@ -30,7 +33,15 @@ async def send_message(
 ):
     """Send a message to the AI assistant and get a response."""
     user_id = current_user["_id"]
-    reply = await ai_service.send_message(db, user_id, body.message, conversation_id=body.conversation_id)
+    reply = await ai_service.send_message(
+        db,
+        user_id,
+        body.message,
+        conversation_id=body.conversation_id,
+        document_id=body.document_id,
+        document_hash=body.document_hash,
+        file_name=body.file_name,
+    )
     return success_response(
         data={"reply": reply},
         message="Message processed.",

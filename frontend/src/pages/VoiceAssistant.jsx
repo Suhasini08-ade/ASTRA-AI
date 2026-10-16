@@ -1,7 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import JarvesRobot from '../components/JarvesRobot';
-import { apiSendVoiceCommand } from '../services/api';
-import { speakText, isVoiceMuted, setVoiceMuted, cleanTextForSpeech } from '../services/voiceService';
+import { apiSendVoiceCommand, apiGetSettings, apiUpdateSettings } from '../services/api';
+import {
+  speakText,
+  isVoiceMuted,
+  setVoiceMuted,
+  getVoiceGender,
+  setVoiceGender,
+  getVoiceSpeed,
+  getLoadedVoices,
+  cleanTextForSpeech,
+  stopSpeech,
+} from '../services/voiceService';
 import { useData } from '../context/DataContext';
 import MarkdownRenderer from '../components/MarkdownRenderer';
 import {
@@ -22,12 +32,54 @@ export default function VoiceAssistant() {
   const [response, setResponse] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
   const [manualInput, setManualInput] = useState('');
-  const [voiceGender, setVoiceGender] = useState(() => localStorage.getItem('astra_voice_gender') || localStorage.getItem('jarves_voice_gender') || 'female');
+  const [voiceGender, setVoiceGenderState] = useState(() => getVoiceGender());
   const [muted, setMuted] = useState(() => isVoiceMuted());
   const [mousePos, setMousePos] = useState({ x: 0.5, y: 0.5 });
   const [recognitionInstance, setRecognitionInstance] = useState(null);
 
+  useEffect(() => {
+    // Pre-warm voices asynchronously on mount so voices are cached immediately
+    getLoadedVoices().catch(() => {});
+
+    // Sync persisted preferences from backend if available
+    async function syncBackendSettings() {
+      try {
+        const s = await apiGetSettings();
+        if (s?.voiceGender) {
+          setVoiceGenderState(s.voiceGender);
+          setVoiceGender(s.voiceGender);
+        }
+        if (s?.voiceMuted !== undefined) {
+          setMuted(s.voiceMuted);
+          setVoiceMuted(s.voiceMuted);
+        }
+      } catch {}
+    }
+    syncBackendSettings();
+
+    const handleVoiceChange = (e) => {
+      if (e.detail?.gender) {
+        setVoiceGenderState(e.detail.gender);
+      }
+    };
+    const handleMuteChange = (e) => {
+      if (e.detail?.muted !== undefined) {
+        setMuted(e.detail.muted);
+      }
+    };
+
+    window.addEventListener('astra_voice_gender_changed', handleVoiceChange);
+    window.addEventListener('astra_voice_muted_changed', handleMuteChange);
+
+    return () => {
+      stopSpeech();
+      window.removeEventListener('astra_voice_gender_changed', handleVoiceChange);
+      window.removeEventListener('astra_voice_muted_changed', handleMuteChange);
+    };
+  }, []);
+
   const sampleCommands = [
+    "Plan my day",
     "Create a task to finish DBMS assignment tomorrow at 6 PM",
     "Show my pending tasks",
     "Mark my DBMS assignment as completed",
@@ -44,9 +96,10 @@ export default function VoiceAssistant() {
     const nextMuted = !muted;
     setMuted(nextMuted);
     setVoiceMuted(nextMuted);
-    if (nextMuted && 'speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
+    if (nextMuted) {
+      stopSpeech();
     }
+    apiUpdateSettings({ voiceMuted: nextMuted }).catch(() => {});
   };
 
   const handleMouseMove = (e) => {
@@ -59,15 +112,13 @@ export default function VoiceAssistant() {
   };
 
   const handleVoiceGenderChange = (gender) => {
+    setVoiceGenderState(gender);
     setVoiceGender(gender);
-    localStorage.setItem('astra_voice_gender', gender);
-    localStorage.setItem('jarves_voice_gender', gender);
+    apiUpdateSettings({ voiceGender: gender }).catch(() => {});
   };
 
   const stopActiveSpeechOrListening = () => {
-    if ('speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-    }
+    stopSpeech();
     if (recognitionInstance) {
       try {
         recognitionInstance.abort();
@@ -148,9 +199,14 @@ export default function VoiceAssistant() {
     setOrbState('thinking');
 
     try {
-      const reply = await apiSendVoiceCommand(text);
-      const textToSpeak = cleanTextForSpeech(reply) || "Command executed successfully.";
-      setResponse(textToSpeak);
+      const res = await apiSendVoiceCommand(text);
+      const fullReply = typeof res === 'string' ? res : (res?.reply || "Command executed successfully.");
+      const spokenSummary = (typeof res === 'object' && res?.spoken_summary)
+        ? res.spoken_summary
+        : cleanTextForSpeech(fullReply) || "Command executed successfully.";
+
+      // Display the complete plan / response in UI
+      setResponse(fullReply);
       setOrbState('speaking');
 
       // Refresh data so any newly created/modified tasks, reminders, etc. appear in UI
@@ -158,8 +214,8 @@ export default function VoiceAssistant() {
         refreshData();
       }
 
-      // Speak using selected voice gender
-      speakText(textToSpeak, voiceGender, 1.0, () => {
+      // Speak concise summary using selected voice gender and speed
+      speakText(spokenSummary, voiceGender, getVoiceSpeed(), () => {
         setOrbState('idle');
       });
     } catch (e) {
@@ -169,7 +225,7 @@ export default function VoiceAssistant() {
       setErrorMsg(errDetail);
       setResponse(errDetail);
       setOrbState('idle');
-      speakText(errDetail, voiceGender, 1.0, () => {
+      speakText(errDetail, voiceGender, getVoiceSpeed(), () => {
         setOrbState('idle');
       });
     }

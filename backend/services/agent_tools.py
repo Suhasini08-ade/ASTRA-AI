@@ -514,6 +514,19 @@ AGENT_TOOLS = [
     },
 
 
+    # --- DAILY PLANNER ---
+    {
+        "type": "function",
+        "function": {
+            "name": "plan_my_day",
+            "description": "Fetch and analyze all existing user data including tasks, notes, reminders, calendar events, deadlines, and priorities, to generate a personalized time-blocked daily schedule with breaks and conflict detection.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+            },
+        },
+    },
+
     # --- DESKTOP AUTOMATION ---
     {
         "type": "function",
@@ -1965,6 +1978,16 @@ async def execute_agent_tool(
         return await _update_reminder(db, user_id, arguments)
     elif tool_name == "delete_reminder":
         return await _delete_reminder(db, user_id, arguments)
+
+    # Daily Planner
+    elif tool_name == "plan_my_day":
+        from backend.services.daily_planner import daily_planner
+        plan_res = await daily_planner.generate_daily_plan(db, user_id)
+        return {
+            "status": "success",
+            "message": plan_res["reply"],
+            "spoken_summary": plan_res["spoken_summary"],
+        }
 
     # Calendar
     elif tool_name == "view_calendar_events":

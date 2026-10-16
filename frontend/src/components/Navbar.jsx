@@ -9,7 +9,8 @@ import {
   Sparkles as LuSparkles, 
   Plus as LuPlus,
   Mic as LuMic,
-  Brain as LuBrain
+  Brain as LuBrain,
+  Timer as LuTimer
 } from 'lucide-react';
 
 export default function Navbar({ onMenuToggle }) {
@@ -73,14 +74,34 @@ export default function Navbar({ onMenuToggle }) {
         </form>
       </div>
 
-      {/* Right side: Quick Actions + Theme Switcher + Profile */}
-      <div className="flex items-center gap-3">
+      {/* Right side: Quick Actions (Focus Mode & Deep Dive) + Theme Switcher + Profile */}
+      <div className="flex items-center gap-2 sm:gap-3">
+        {/* Focus Mode Button */}
+        <button
+          onClick={() => navigate('/focus-mode')}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all ${
+            location.pathname === '/focus-mode'
+              ? 'bg-gradient-to-r from-purple-600 via-indigo-600 to-blue-600 text-white shadow-md shadow-purple-900/40 ring-1 ring-purple-400/50'
+              : 'bg-slate-100 hover:bg-slate-200/80 dark:bg-slate-800/80 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-200/80 dark:border-slate-700/60 hover:text-purple-600 dark:hover:text-purple-300'
+          }`}
+          title="Focus Mode"
+        >
+          <LuTimer className={`w-3.5 h-3.5 ${location.pathname === '/focus-mode' ? 'text-white' : 'text-purple-500 dark:text-purple-400'}`} />
+          <span className="hidden sm:inline">Focus Mode</span>
+        </button>
+
+        {/* Deep Dive Button */}
         <button
           onClick={() => navigate('/deep-dive')}
-          className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-gradient-to-r from-purple-600 to-cyan-600 text-white hover:opacity-95 shadow-sm shadow-purple-900/30 transition-all"
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all ${
+            location.pathname === '/deep-dive'
+              ? 'bg-gradient-to-r from-purple-600 to-cyan-600 text-white shadow-md shadow-purple-900/40 ring-1 ring-cyan-400/50'
+              : 'bg-slate-100 hover:bg-slate-200/80 dark:bg-slate-800/80 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-200/80 dark:border-slate-700/60 hover:text-cyan-600 dark:hover:text-cyan-300'
+          }`}
+          title="Deep Dive"
         >
-          <LuBrain className="w-3.5 h-3.5" />
-          <span>Deep Dive</span>
+          <LuBrain className={`w-3.5 h-3.5 ${location.pathname === '/deep-dive' ? 'text-white' : 'text-cyan-500 dark:text-cyan-400'}`} />
+          <span className="hidden sm:inline">Deep Dive</span>
         </button>
 
         <ThemeSwitcher />

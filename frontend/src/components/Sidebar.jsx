@@ -12,8 +12,6 @@ import {
   CloudSun as LuCloudSun, 
   Newspaper as LuNewspaper, 
   FolderOpen as LuFolderOpen, 
-  Timer as LuTimer, 
-  Brain as LuBrain, 
   User as LuUser, 
   Settings as LuSettings, 
   LogOut as LuLogOut,
@@ -36,8 +34,6 @@ export default function Sidebar({ isOpen, setIsOpen }) {
     { name: 'Weather', path: '/weather', icon: LuCloudSun },
     { name: 'News', path: '/news', icon: LuNewspaper },
     { name: 'Documents', path: '/documents', icon: LuFolderOpen },
-    { name: 'Focus Mode', path: '/focus-mode', icon: LuTimer },
-    { name: 'Deep Dive', path: '/deep-dive', icon: LuBrain },
   ];
 
   const bottomItems = [
@@ -60,9 +56,9 @@ export default function Sidebar({ isOpen, setIsOpen }) {
         />
       )}
 
-      {/* FIXED STATIC SIDEBAR - Does NOT scroll away */}
+      {/* FIXED STATIC SIDEBAR - Does NOT scroll away and is not scrollable */}
       <aside 
-        className={`fixed top-0 left-0 bottom-0 w-64 bg-slate-900/95 dark:bg-[#080d1e]/95 border-r border-slate-800 text-slate-100 flex flex-col z-50 transition-transform duration-300 ease-in-out lg:translate-x-0 ${
+        className={`fixed top-0 left-0 bottom-0 w-64 bg-slate-900/95 dark:bg-[#080d1e]/95 border-r border-slate-800 text-slate-100 flex flex-col z-50 transition-transform duration-300 ease-in-out lg:translate-x-0 select-none overflow-hidden ${
           isOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
@@ -88,8 +84,8 @@ export default function Sidebar({ isOpen, setIsOpen }) {
           </button>
         </div>
 
-        {/* Scrollable Navigation links inside sidebar */}
-        <div className="flex-1 overflow-y-auto px-3 py-4 space-y-1 custom-scrollbar">
+        {/* Static Non-Scrollable Navigation links */}
+        <div className="flex-1 overflow-hidden px-3 py-3 space-y-1">
           <div className="px-3 pb-2 text-[10px] font-bold text-slate-400 uppercase tracking-widest">
             Core Modules
           </div>
@@ -102,7 +98,7 @@ export default function Sidebar({ isOpen, setIsOpen }) {
                 to={item.path}
                 onClick={() => setIsOpen(false)}
                 className={({ isActive }) =>
-                  `flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all group ${
+                  `flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-all group ${
                     isActive
                       ? 'bg-gradient-to-r from-purple-600/90 to-blue-600/90 text-white shadow-md shadow-purple-900/30 font-semibold'
                       : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/60'
@@ -126,7 +122,7 @@ export default function Sidebar({ isOpen, setIsOpen }) {
                 to={item.path}
                 onClick={() => setIsOpen(false)}
                 className={({ isActive }) =>
-                  `flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
+                  `flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-all ${
                     isActive
                       ? 'bg-slate-800 text-cyan-400 font-semibold'
                       : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/60'
@@ -141,7 +137,7 @@ export default function Sidebar({ isOpen, setIsOpen }) {
 
           <button
             onClick={handleLogout}
-            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 transition-all"
+            className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 transition-all"
           >
             <LuLogOut className="w-4 h-4 shrink-0" />
             <span>Logout</span>

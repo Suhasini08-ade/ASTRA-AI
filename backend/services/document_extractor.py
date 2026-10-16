@@ -6,6 +6,7 @@ Ensures raw binary data is never forwarded to AI models and handles long documen
 """
 
 import base64
+import hashlib
 import io
 import logging
 import re
@@ -18,6 +19,9 @@ logger = logging.getLogger(__name__)
 
 # Max characters of extracted text passed to AI for token context safety (~3,500-4,000 tokens)
 MAX_DOCUMENT_CHARS = 15_000
+
+# Fast in-memory extraction cache: {hash_key: extracted_text}
+_extraction_cache: dict[str, str] = {}
 
 
 class DocumentExtractionError(Exception):
@@ -77,8 +81,8 @@ def _decode_to_bytes(raw_content: Union[str, bytes]) -> tuple[bytes, bool]:
     return content.encode("utf-8", errors="ignore"), False
 
 
-def _extract_pdf(data_bytes: bytes, file_name: str) -> str:
-    """Extract readable text from a PDF byte stream."""
+def _extract_pdf(data_bytes: bytes, file_name: str, max_chars: Optional[int] = None) -> str:
+    """Extract readable text from a PDF byte stream with early page exit when max_chars is set."""
     try:
         reader = pypdf.PdfReader(io.BytesIO(data_bytes))
         if reader.is_encrypted:
@@ -90,10 +94,16 @@ def _extract_pdf(data_bytes: bytes, file_name: str) -> str:
                 )
 
         pages_text = []
+        total_chars = 0
         for i, page in enumerate(reader.pages):
             page_text = page.extract_text() or ""
-            if page_text.strip():
-                pages_text.append(page_text.strip())
+            clean_page = page_text.strip()
+            if clean_page:
+                pages_text.append(clean_page)
+                total_chars += len(clean_page)
+                # If a character limit is requested (e.g. for summarization), stop early to save CPU
+                if max_chars is not None and total_chars >= (max_chars * 1.25):
+                    break
 
         full_text = "\n\n".join(pages_text).strip()
         if not full_text:
@@ -110,7 +120,7 @@ def _extract_pdf(data_bytes: bytes, file_name: str) -> str:
         raise DocumentExtractionError(f"Failed to parse PDF document: {exc}", file_name)
 
 
-def _extract_docx(data_bytes: bytes, file_name: str) -> str:
+def _extract_docx(data_bytes: bytes, file_name: str, max_chars: Optional[int] = None) -> str:
     """Extract readable text from a DOCX byte stream."""
     try:
         doc = docx.Document(io.BytesIO(data_bytes))
@@ -144,6 +154,7 @@ def extract_text_from_document(
 ) -> str:
     """
     Safely extract plain text from an uploaded document (PDF, DOCX, TXT, MD).
+    Leverages in-memory SHA-256 caching for instant reuse on duplicate files.
 
     :param content: String (plain text, base64, or data URI) or raw bytes.
     :param file_name: Original file name.
@@ -159,10 +170,16 @@ def extract_text_from_document(
 
     data_bytes, is_binary = _decode_to_bytes(content)
 
+    # Check extraction cache
+    byte_hash = hashlib.sha256(data_bytes).hexdigest()
+    cache_key = f"{byte_hash}_{max_chars}"
+    if cache_key in _extraction_cache:
+        return _extraction_cache[cache_key]
+
     is_pdf = (
-        type_lower == "pdf"
-        or name_lower.endswith(".pdf")
-        or data_bytes.startswith(b"%PDF")
+        data_bytes.startswith(b"%PDF")
+        or (type_lower == "pdf" and (is_binary or data_bytes.startswith(b"%PDF")))
+        or (name_lower.endswith(".pdf") and (is_binary or data_bytes.startswith(b"%PDF")))
     )
 
     is_docx = (
@@ -172,9 +189,21 @@ def extract_text_from_document(
     )
 
     if is_pdf:
-        extracted = _extract_pdf(data_bytes, file_name)
+        try:
+            extracted = _extract_pdf(data_bytes, file_name, max_chars=max_chars)
+        except DocumentExtractionError:
+            # Fall back to text if data_bytes was actually decoded text with a .pdf name
+            try:
+                decoded = data_bytes.decode("utf-8")
+                non_p = sum(1 for c in decoded if ord(c) < 32 and c not in "\n\r\t")
+                if len(decoded) > 0 and (non_p / len(decoded)) < 0.05:
+                    extracted = decoded
+                else:
+                    raise
+            except Exception:
+                raise
     elif is_docx:
-        extracted = _extract_docx(data_bytes, file_name)
+        extracted = _extract_docx(data_bytes, file_name, max_chars=max_chars)
     else:
         # Plain text / Markdown
         try:
@@ -190,7 +219,6 @@ def extract_text_from_document(
 
     # Check for binary gibberish if it wasn't recognized as PDF or DOCX
     if not is_pdf and not is_docx:
-        # Check percentage of null/unprintable characters
         non_printable = sum(1 for c in cleaned if ord(c) < 32 and c not in "\n\r\t")
         if len(cleaned) > 0 and (non_printable / len(cleaned)) > 0.05:
             raise DocumentExtractionError(
@@ -198,7 +226,7 @@ def extract_text_from_document(
                 file_name,
             )
 
-    # Apply length cap if specified (e.g. for AI token and context safety)
+    # Apply length cap if specified
     if max_chars is not None and len(cleaned) > max_chars:
         logger.info(
             "Document '%s' length (%d chars) exceeds max limit (%d). Truncating safely.",
@@ -211,4 +239,6 @@ def extract_text_from_document(
             + "\n\n[... Document content truncated for summarization context window limit ...]"
         )
 
+    _extraction_cache[cache_key] = cleaned
     return cleaned
+

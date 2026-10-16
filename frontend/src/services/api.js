@@ -293,10 +293,16 @@ export async function apiCreateFocusSession(sessionData) {
 // AI Chat & Agent Endpoints (/api/chat & /api/agent)
 // -----------------------------------------------------------------------------
 
-export async function apiSendChatMessage(message, conversationId = null) {
+export async function apiSendChatMessage(message, conversationId = null, docMetadata = null) {
+  const payload = { message, conversation_id: conversationId };
+  if (docMetadata) {
+    if (docMetadata.document_id) payload.document_id = docMetadata.document_id;
+    if (docMetadata.document_hash) payload.document_hash = docMetadata.document_hash;
+    if (docMetadata.file_name) payload.file_name = docMetadata.file_name;
+  }
   const res = await apiRequest('/api/chat', {
     method: 'POST',
-    body: JSON.stringify({ message, conversation_id: conversationId }),
+    body: JSON.stringify(payload),
   });
   return res.data?.reply || '';
 }
@@ -335,7 +341,7 @@ export async function apiSendVoiceCommand(message) {
     method: 'POST',
     body: JSON.stringify({ message }),
   });
-  return res.data?.reply || '';
+  return res.data || { reply: '' };
 }
 
 // -----------------------------------------------------------------------------
@@ -347,8 +353,17 @@ export async function apiSummarizeDocument(fileContent, fileName = 'document', f
     method: 'POST',
     body: JSON.stringify({ fileContent, fileName, fileType }),
   });
-  return res.data?.summary || null;
+  return res.data || null;
 }
+
+export async function apiAskDocumentQuestion(question, { documentId = null, documentHash = null, fileName = null, documentText = null } = {}) {
+  const res = await apiRequest('/api/summarize/ask', {
+    method: 'POST',
+    body: JSON.stringify({ question, documentId, documentHash, fileName, documentText }),
+  });
+  return res.data || null;
+}
+
 
 export async function apiUploadKnowledgeDocument(file, title = '', category = 'document') {
   const formData = new FormData();
@@ -387,8 +402,22 @@ export async function apiDeleteDocument(docId) {
 // Weather & News Endpoints (/api/weather & /api/news)
 // -----------------------------------------------------------------------------
 
-export async function apiGetWeather(location = 'Latur') {
-  return await apiRequest(`/api/weather?location=${encodeURIComponent(location)}`, {
+export async function apiGetWeather(location = null, lat = null, lon = null) {
+  let qs = '';
+  if (lat !== null && lon !== null && lat !== undefined && lon !== undefined) {
+    qs = `lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}`;
+  } else if (location && typeof location === 'object') {
+    if (location.lat != null && location.lon != null) {
+      qs = `lat=${encodeURIComponent(location.lat)}&lon=${encodeURIComponent(location.lon)}`;
+    } else {
+      qs = `location=${encodeURIComponent(location.location || 'Kolhapur')}`;
+    }
+  } else if (location && String(location).trim()) {
+    qs = `location=${encodeURIComponent(String(location).trim())}`;
+  } else {
+    qs = 'location=Kolhapur';
+  }
+  return await apiRequest(`/api/weather?${qs}`, {
     method: 'GET',
   });
 }

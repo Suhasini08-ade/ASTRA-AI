@@ -81,7 +81,7 @@ class ContextEngine:
         ]
 
         if any(hint in lowered for hint in self._PLANNING_HINTS):
-            for category in ("tasks", "calendar", "reminders", "focus_sessions", "settings"):
+            for category in ("tasks", "calendar", "reminders", "notes", "focus_sessions", "settings"):
                 if category not in categories:
                     categories.append(category)
         if any(hint in lowered for hint in self._CHAT_HINTS):

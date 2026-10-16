@@ -120,52 +120,30 @@ def get_database() -> AsyncIOMotorDatabase:
 
 
 async def _create_indexes(db: AsyncIOMotorDatabase) -> None:
-    """Create MongoDB indexes for all collections."""
-
-    # Users
-    await db.users.create_index("email", unique=True)
-
-    # Profiles
-    await db.profiles.create_index("user_id", unique=True)
-
-    # Notes
-    await db.notes.create_index("user_id")
-    await db.notes.create_index("created_at")
-
-    # Tasks
-    await db.tasks.create_index("user_id")
-    await db.tasks.create_index("status")
-    await db.tasks.create_index("due_date")
-
-    # Focus sessions are always queried by their authenticated owner and recency.
-    await db.focus_sessions.create_index([("user_id", 1), ("timestamp", -1)])
-
-    # Reminders
-    await db.reminders.create_index("user_id")
-    await db.reminders.create_index("due_time")
-
-    # Calendar Events
-    await db.calendar_events.create_index("user_id")
-    await db.calendar_events.create_index("start_time")
-
-    # Chat Messages
-    await db.chat_messages.create_index("user_id")
-    await db.chat_messages.create_index("created_at")
-    await db.chat_messages.create_index([("user_id", 1), ("conversation_id", 1), ("created_at", 1)])
-
-    # Deep Dive knowledge-map sessions are private and opened by recency.
-    await db.deep_dives.create_index([("user_id", 1), ("updated_at", -1)])
-
-    # Settings
-    await db.settings.create_index("user_id", unique=True)
-
-    # Knowledge Items (for Qdrant metadata and vector mirror)
-    await db.knowledge_items.create_index([("user_id", 1), ("content_hash", 1)])
-    await db.knowledge_items.create_index([("user_id", 1), ("category", 1)])
-    await db.knowledge_items.create_index([("user_id", 1), ("created_at", -1)])
-
-    # Documents & Files (ingested PDFs, DOCX, TXT)
-    await db.documents.create_index([("user_id", 1), ("file_name", 1)])
-    await db.documents.create_index([("user_id", 1), ("created_at", -1)])
-
+    """Create MongoDB indexes for all collections concurrently."""
+    index_tasks = [
+        db.users.create_index("email", unique=True),
+        db.profiles.create_index("user_id", unique=True),
+        db.notes.create_index("user_id"),
+        db.notes.create_index("created_at"),
+        db.tasks.create_index("user_id"),
+        db.tasks.create_index("status"),
+        db.tasks.create_index("due_date"),
+        db.focus_sessions.create_index([("user_id", 1), ("timestamp", -1)]),
+        db.reminders.create_index("user_id"),
+        db.reminders.create_index("due_time"),
+        db.calendar_events.create_index("user_id"),
+        db.calendar_events.create_index("start_time"),
+        db.chat_messages.create_index("user_id"),
+        db.chat_messages.create_index("created_at"),
+        db.chat_messages.create_index([("user_id", 1), ("conversation_id", 1), ("created_at", 1)]),
+        db.deep_dives.create_index([("user_id", 1), ("updated_at", -1)]),
+        db.settings.create_index("user_id", unique=True),
+        db.knowledge_items.create_index([("user_id", 1), ("content_hash", 1)]),
+        db.knowledge_items.create_index([("user_id", 1), ("category", 1)]),
+        db.knowledge_items.create_index([("user_id", 1), ("created_at", -1)]),
+        db.documents.create_index([("user_id", 1), ("file_name", 1)]),
+        db.documents.create_index([("user_id", 1), ("created_at", -1)]),
+    ]
+    await asyncio.gather(*index_tasks, return_exceptions=True)
     logger.info("MongoDB indexes created successfully.")

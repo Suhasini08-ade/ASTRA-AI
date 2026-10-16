@@ -68,42 +68,27 @@ def _group_forecast_by_day(raw_forecasts: list) -> list:
 
 
 @router.get("")
-async def get_weather(location: str = Query(default="Latur")):
-    """Get current weather and 5-day forecast (one entry per day) for a location."""
-    current = await weather_service.get_current_weather(city=location)
-    forecast = await weather_service.get_forecast(city=location)
+async def get_weather(
+    location: str | None = Query(default=None),
+    lat: float | None = Query(default=None),
+    lon: float | None = Query(default=None),
+):
+    """Get current weather and 5-day forecast for a location (city name or lat,lon coordinates)."""
+    if lat is not None and lon is not None:
+        target = f"{lat},{lon}"
+    elif location and location.strip():
+        target = location.strip()
+    else:
+        target = "Kolhapur"
 
-    if "error" in current and "Could not find weather data" in current["error"]:
-        raise HTTPException(status_code=404, detail="City not found.")
+    current = await weather_service.get_current_weather(city=target)
+    forecast = await weather_service.get_forecast(city=target)
 
-    if "error" in current and not current.get("temperature"):
-        # Fallback structured data if API key not set or fetch failed
-        return {
-            "location": location,
-            "current": {
-                "temp": 72,
-                "condition": "Partly Cloudy",
-                "icon": "partly-cloudy",
-                "high": 76,
-                "low": 58,
-                "humidity": 62,
-                "windSpeed": "12 mph SW",
-                "pressure": "1014 hPa",
-                "uvIndex": 6,
-                "airQuality": "Good (34 AQI)",
-                "sunrise": "06:12 AM",
-                "sunset": "08:18 PM",
-                "feelsLike": 73,
-            },
-            "forecast": [
-                {"day": "Today",     "date": "", "tempHigh": 76, "tempLow": 58, "condition": "Partly Cloudy", "icon": "partly-cloudy", "pop": "10%"},
-                {"day": "Tue",       "date": "", "tempHigh": 78, "tempLow": 60, "condition": "Sunny",         "icon": "sunny",         "pop": "0%"},
-                {"day": "Wed",       "date": "", "tempHigh": 71, "tempLow": 56, "condition": "Cloudy",        "icon": "cloudy",        "pop": "25%"},
-                {"day": "Thu",       "date": "", "tempHigh": 68, "tempLow": 54, "condition": "Light Rain",    "icon": "rain",          "pop": "60%"},
-                {"day": "Fri",       "date": "", "tempHigh": 74, "tempLow": 57, "condition": "Clear",         "icon": "sunny",         "pop": "5%"},
-            ],
-            "aiSummary": "Live weather service connected via FastAPI backend.",
-        }
+    if "error" in current:
+        err = current["error"]
+        if "Could not find weather data" in err or "not found" in err.lower():
+            raise HTTPException(status_code=404, detail=f"Location '{target}' not found. Please verify the city name or coordinates.")
+        raise HTTPException(status_code=502, detail=err)
 
     # ── Group 3-hour intervals into one entry per calendar day ───────────────
     daily_forecast = _group_forecast_by_day(forecast.get("forecasts", []))
@@ -113,21 +98,21 @@ async def get_weather(location: str = Query(default="Latur")):
         daily_forecast = [{
             "day": "Today",
             "date": str(_date.today()),
-            "tempHigh": round(current.get("temp_max", 28)),
-            "tempLow": round(current.get("temp_min", 20)),
+            "tempHigh": round(current.get("temp_max", current.get("temperature", 25))),
+            "tempLow": round(current.get("temp_min", current.get("temperature", 20))),
             "condition": current.get("description", "Clear").title(),
-            "icon": "sunny",
+            "icon": current.get("icon", "01d"),
             "pop": "0%",
         }]
 
     return {
-        "location": ", ".join(filter(None, [current.get("city", location), current.get("country", "")])),
+        "location": ", ".join(filter(None, [current.get("city", target), current.get("country", "")])),
         "current": {
             "temp": round(current.get("temperature", 25)),
             "condition": current.get("description", "Clear").title(),
-            "icon": current.get("icon", "sunny"),
-            "high": round(current.get("temp_max", 28)),
-            "low": round(current.get("temp_min", 20)),
+            "icon": current.get("icon", "01d"),
+            "high": round(current.get("temp_max", current.get("temperature", 28))),
+            "low": round(current.get("temp_min", current.get("temperature", 20))),
             "humidity": current.get("humidity", 50),
             "windSpeed": f"{current.get('wind_speed', 5)} m/s",
             "pressure": f"{current.get('pressure', 1013)} hPa",
@@ -135,8 +120,8 @@ async def get_weather(location: str = Query(default="Latur")):
             "airQuality": "Good",
             "sunrise": "06:00 AM",
             "sunset": "06:30 PM",
-            "feelsLike": round(current.get("feels_like", 25))
+            "feelsLike": round(current.get("feels_like", current.get("temperature", 25)))
         },
         "forecast": daily_forecast,
-        "aiSummary": f"Current weather in {current.get('city', location)}: {current.get('description', 'Clear')} with temperature around {round(current.get('temperature', 25))}°C."
+        "aiSummary": f"Current weather in {current.get('city', target)}: {current.get('description', 'Clear')} with temperature around {round(current.get('temperature', 25))}°C."
     }

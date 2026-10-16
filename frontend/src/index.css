@@ -169,3 +169,30 @@ body {
   animation: cloud-drift-left 25s ease-in-out infinite;
 }
 
+/* Deep Dive Knowledge Map Glow & Flow Animations */
+@keyframes pulse-glow {
+  0%, 100% {
+    box-shadow: 0 0 15px rgba(168, 85, 247, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 28px rgba(6, 182, 212, 0.55);
+  }
+}
+
+@keyframes branch-flow {
+  0% {
+    stroke-dashoffset: 40;
+  }
+  100% {
+    stroke-dashoffset: 0;
+  }
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 3.5s ease-in-out infinite;
+}
+
+.animate-branch-flow {
+  animation: branch-flow 1.8s linear infinite;
+}
+

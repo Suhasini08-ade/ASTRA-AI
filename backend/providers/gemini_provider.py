@@ -31,12 +31,25 @@ class GeminiProvider(BaseAIProvider):
 
     def __init__(self, api_key: str | None = None, model: str | None = None) -> None:
         settings = get_settings()
-        key = api_key or settings.GEMINI_API_KEY
+        self._api_key = api_key or settings.GEMINI_API_KEY
         self._model = model or settings.GEMINI_MODEL or "gemini-3.5-flash-lite"
+        self._base_url = GEMINI_BASE_URL
         self._client: AsyncOpenAI | None = None
+        self._bound_loop = None
 
-        if key:
-            self._client = AsyncOpenAI(api_key=key, base_url=GEMINI_BASE_URL)
+    def _get_client(self) -> AsyncOpenAI | None:
+        if not self._api_key:
+            return None
+        import asyncio
+        current_loop = None
+        try:
+            current_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            pass
+        if self._client is None or self._bound_loop != current_loop:
+            self._client = AsyncOpenAI(api_key=self._api_key, base_url=self._base_url, max_retries=0)
+            self._bound_loop = current_loop
+        return self._client
 
     async def chat_completion(
         self,
@@ -44,7 +57,8 @@ class GeminiProvider(BaseAIProvider):
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str | dict[str, Any] | None = None,
     ) -> AIProviderResponse:
-        if not self._client:
+        client = self._get_client()
+        if not client:
             raise AIProviderConfigurationError(
                 "Gemini is not configured. Set GEMINI_API_KEY in backend/.env.",
                 provider="gemini",
@@ -67,7 +81,7 @@ class GeminiProvider(BaseAIProvider):
             kwargs["tool_choice"] = tool_choice or "auto"
 
         try:
-            response = await self._client.chat.completions.create(**kwargs)
+            response = await client.chat.completions.create(**kwargs)
             choice = response.choices[0].message
 
             tool_calls: list[ToolCallItem] = []

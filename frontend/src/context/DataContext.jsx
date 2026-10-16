@@ -192,14 +192,27 @@ export function DataProvider({ children }) {
       if (knowRes.status === 'fulfilled') {
         const rawDocs = knowRes.value?.documents || [];
         setDocuments(
-          rawDocs.map((d) => ({
-            id: d.id,
-            name: d.file_name || 'document',
-            size: `${Math.max(1, Math.round((d.character_count || 1000) / 1000))} KB`,
-            uploadedAt: d.created_at ? String(d.created_at).split('T')[0] : '',
-            summary: `Indexed document containing ${d.chunks_count || 0} vector knowledge chunks.`,
-            extractedText: d.text_preview || '',
-          }))
+          rawDocs.map((d) => {
+            let summaryText = `Indexed document containing ${d.chunks_count || 0} vector knowledge chunks.`;
+            if (d.summary) {
+              if (typeof d.summary === 'string') {
+                summaryText = d.summary;
+              } else if (d.summary.executiveSummary) {
+                summaryText = d.summary.executiveSummary;
+              }
+            }
+            return {
+              id: d.id,
+              name: d.file_name || 'document',
+              size: `${Math.max(1, Math.round((d.character_count || 1000) / 1000))} KB`,
+              uploadedAt: d.created_at ? String(d.created_at).split('T')[0] : '',
+              summary: summaryText,
+              extractedText: d.text_preview || '',
+              chunksCount: d.chunks_count || 1,
+              indexingStatus: d.status || 'indexed',
+              contentHash: d.content_hash || '',
+            };
+          })
         );
       }
     } catch (err) {
@@ -372,7 +385,12 @@ export function DataProvider({ children }) {
 
   // Documents
   const addDocument = (doc) => {
-    setDocuments((prev) => [doc, ...prev]);
+    setDocuments((prev) => {
+      const filtered = prev.filter(
+        (d) => d.id !== doc.id && d.name !== doc.name && (!d.contentHash || d.contentHash !== doc.contentHash)
+      );
+      return [doc, ...filtered];
+    });
   };
 
   const deleteDocument = async (id) => {

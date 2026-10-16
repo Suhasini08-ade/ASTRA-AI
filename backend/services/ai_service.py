@@ -76,6 +76,9 @@ class AIService:
         conversation_id: str | None = None,
         persist_history: bool = True,
         voice_mode: bool = False,
+        document_id: str | None = None,
+        document_hash: str | None = None,
+        file_name: str | None = None,
     ) -> str:
         """
         Send a user message, process through AI Provider & Tools Agent, and persist history.
@@ -83,9 +86,12 @@ class AIService:
         :param db: Database instance.
         :param user_id: ID of the authenticated user.
         :param message: The user's message text.
-        :param voice_mode: When True, uses a terse voice-optimised system prompt and skips
-            history persistence. The AI executes the requested tool then replies in a single
-            short confirmation sentence (e.g. "Done. Task added.") with no markdown or IDs.
+        :param conversation_id: Optional conversation/session ID.
+        :param persist_history: Whether to store user/assistant messages in database.
+        :param voice_mode: Terse voice-optimised prompt and skip history persistence.
+        :param document_id: Optional MongoDB document ID of an attached file.
+        :param document_hash: Optional SHA-256 hash of an attached file.
+        :param file_name: Optional original filename of an attached file.
         :return: The AI Agent's final natural language response text.
         """
         if not message or not message.strip():
@@ -93,6 +99,34 @@ class AIService:
 
         message = message.strip()
         now = datetime.now(timezone.utc)
+
+        # Plan My Day workflow: fetch and analyze real database data across tasks, events, reminders, notes
+        from backend.services.daily_planner import daily_planner, is_plan_my_day_command
+        if is_plan_my_day_command(message):
+            plan_res = await daily_planner.generate_daily_plan(db, user_id)
+            full_reply = plan_res["reply"]
+            spoken_summary = plan_res["spoken_summary"]
+            if persist_history:
+                try:
+                    await db.chat_messages.insert_one({
+                        "user_id": user_id,
+                        "conversation_id": conversation_id or "legacy",
+                        "role": "user",
+                        "content": message,
+                        "created_at": now,
+                    })
+                    await db.chat_messages.insert_one({
+                        "user_id": user_id,
+                        "conversation_id": conversation_id or "legacy",
+                        "role": "assistant",
+                        "content": full_reply,
+                        "created_at": now,
+                    })
+                except Exception as exc:
+                    logger.error("Failed to save plan chat message: %s", exc)
+            if voice_mode:
+                return {"reply": full_reply, "spoken_summary": spoken_summary}
+            return full_reply
 
         # Fast direct execution for unambiguous local desktop control commands (bypasses remote AI & Qdrant)
         direct_desktop = self._match_direct_desktop_command(message)
@@ -135,13 +169,20 @@ class AIService:
         # not persist or inherit normal-chat context.
         if persist_history:
             try:
-                await db.chat_messages.insert_one({
+                user_msg_doc: dict[str, Any] = {
                     "user_id": user_id,
                     "conversation_id": conversation_id or "legacy",
                     "role": "user",
                     "content": message.strip(),
                     "created_at": now,
-                })
+                }
+                if document_id or document_hash or file_name:
+                    user_msg_doc["attachment"] = {
+                        "document_id": document_id,
+                        "document_hash": document_hash,
+                        "file_name": file_name,
+                    }
+                await db.chat_messages.insert_one(user_msg_doc)
             except PyMongoError as exc:
                 logger.error("Failed to save user chat message to MongoDB: %s", exc)
 
@@ -194,6 +235,56 @@ class AIService:
                 "you MUST invoke all necessary function tools before providing your final response. "
                 "Combine and summarize the execution results of ALL tools into a single cohesive, natural, clear, and professional response. "
                 f"The current UTC date and time is {current_time_str}. Use this exact timestamp to calculate relative dates like 'tomorrow', 'next week', or 'in 2 hours'."
+            )
+
+        # Targeted document vector search when an attached file is present
+        doc_context_text = ""
+        if document_hash or file_name or document_id:
+            try:
+                doc_hits = await knowledge_service.search_knowledge(
+                    user_id=user_id,
+                    query=message.strip(),
+                    document_hash=document_hash,
+                    file_name=file_name,
+                    limit=8,
+                    score_threshold=0.15,
+                )
+                if doc_hits:
+                    doc_context_text = "\n\n".join(
+                        f"[Excerpt {idx + 1} from {hit.get('title') or hit.get('source', file_name or 'Document')}]:\n{hit.get('text')}"
+                        for idx, hit in enumerate(doc_hits)
+                    )
+            except Exception as d_err:
+                logger.warning("Targeted document vector search failed: %s", d_err)
+
+            # Fallback to direct MongoDB document content preview if semantic search returned no chunks
+            if not doc_context_text and db is not None:
+                try:
+                    from bson import ObjectId
+                    query_doc: dict[str, Any] = {"user_id": user_id}
+                    if document_hash:
+                        query_doc["content_hash"] = document_hash
+                    elif document_id and ObjectId.is_valid(document_id):
+                        query_doc["_id"] = ObjectId(document_id)
+                    elif file_name:
+                        query_doc["file_name"] = file_name
+
+                    doc_record = await db.documents.find_one(query_doc)
+                    if doc_record:
+                        if doc_record.get("text_preview"):
+                            doc_context_text = f"[Document Preview - {doc_record.get('file_name', file_name or 'Document')}]:\n{doc_record.get('text_preview')}"
+                        elif doc_record.get("chunks"):
+                            snippets = [c.get("text_snippet", "") for c in doc_record.get("chunks", [])[:6]]
+                            doc_context_text = f"[Document Excerpts - {doc_record.get('file_name', file_name or 'Document')}]:\n" + "\n".join(snippets)
+                except Exception as d_mongo_err:
+                    logger.warning("Failed to fetch fallback document preview: %s", d_mongo_err)
+
+        if doc_context_text:
+            system_prompt += (
+                f"\n\n[ATTACHED DOCUMENT CONTEXT - {file_name or 'Uploaded Document'}]:\n"
+                f"{doc_context_text}\n"
+                "The user has attached this document to their message. Answer their questions accurately and directly using this document's content. "
+                "Base your response primarily on the attached document context."
             )
 
         # Retrieve relevant semantic knowledge from Qdrant vector memory
@@ -867,7 +958,7 @@ class AIService:
                     query["conversation_id"] = conversation_id
             cursor = db.chat_messages.find(
                 query,
-                {"_id": 1, "role": 1, "content": 1, "created_at": 1},
+                {"_id": 1, "role": 1, "content": 1, "created_at": 1, "attachment": 1},
             ).sort("created_at", -1).limit(limit)
 
             messages = await cursor.to_list(length=limit)
@@ -900,7 +991,7 @@ class AIService:
                 query["conversation_id"] = conversation_id
             cursor = db.chat_messages.find(
                 query,
-                {"role": 1, "content": 1, "_id": 0},
+                {"role": 1, "content": 1, "_id": 0, "attachment": 1},
             ).sort("created_at", -1).limit(MAX_CONTEXT_MESSAGES)
 
             messages = await cursor.to_list(length=MAX_CONTEXT_MESSAGES)

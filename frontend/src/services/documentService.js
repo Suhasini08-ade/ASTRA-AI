@@ -1,5 +1,6 @@
 import {
   apiSummarizeDocument,
+  apiAskDocumentQuestion,
   apiUploadKnowledgeDocument,
   apiSearchKnowledge,
   apiSendChatMessage,
@@ -32,7 +33,7 @@ function readFileContent(file) {
 /**
  * Formats structured backend summary JSON into a readable string for the UI.
  */
-function formatSummary(rawSummary, fileName) {
+export function formatSummary(rawSummary, fileName) {
   if (!rawSummary) return `Summary generated for ${fileName}.`;
 
   if (typeof rawSummary === 'string') return rawSummary;
@@ -60,34 +61,62 @@ function formatSummary(rawSummary, fileName) {
 /**
  * Processes an uploaded document through the FastAPI backend:
  * 1. Reads file payload
- * 2. Summarizes content using backend AI router (/api/summarize)
- * 3. Ingests and indexes into Qdrant Vector DB & MongoDB (/api/knowledge/upload)
+ * 2. Coordinates fast extraction, content-hash deduplication, and automatic Qdrant indexing
+ * 3. Returns structured document metadata, summary, and live indexing status
  */
-export async function processUploadedDocument(file) {
+export async function processUploadedDocument(file, onStatusUpdate = null) {
   if (!file) throw new Error('No file provided for upload.');
 
   const fileName = file.name || 'document.pdf';
   const fileSize = `${(file.size / (1024 * 1024)).toFixed(2)} MB`;
   const fileExt = fileName.includes('.') ? fileName.split('.').pop().toLowerCase() : 'pdf';
 
+  onStatusUpdate?.({ step: 'reading', message: `Reading ${fileName} (${fileSize})...` });
+
   // Read content
   const content = await readFileContent(file);
 
-  // 1. Call backend document summarizer endpoint
-  let summaryText = '';
-  try {
-    const summaryData = await apiSummarizeDocument(content, fileName, fileExt);
-    summaryText = formatSummary(summaryData, fileName);
-  } catch (err) {
-    console.warn('Backend summarization failed, falling back to default info:', err);
-    summaryText = `Uploaded ${fileName} (${fileSize}). Ready for vector search and AI querying.`;
-  }
+  onStatusUpdate?.({ step: 'indexing', message: 'Extracting text & checking Qdrant vector index...' });
 
-  // 2. Index in Qdrant & MongoDB Knowledge collection
+  let summaryText = '';
+  let docId = `doc-${Date.now()}`;
+  let indexingStatus = 'indexed';
+  let isDuplicate = false;
+  let chunksCount = 1;
+  let contentHash = '';
+
   try {
-    await apiUploadKnowledgeDocument(file, fileName, 'document');
-  } catch (ingestErr) {
-    console.warn('Knowledge vector indexing failed or offline:', ingestErr);
+    const res = await apiSummarizeDocument(content, fileName, fileExt);
+    const summaryData = res?.summary || res;
+    summaryText = formatSummary(summaryData, fileName);
+
+    if (res?.document) {
+      docId = res.document.id || docId;
+      chunksCount = res.document.chunks_count || chunksCount;
+      contentHash = res.document.content_hash || '';
+    }
+    indexingStatus = res?.indexing_status || 'indexed';
+    isDuplicate = Boolean(res?.is_duplicate);
+
+    if (isDuplicate) {
+      onStatusUpdate?.({
+        step: 'duplicate',
+        message: 'Duplicate detected! Reused existing Qdrant vector embeddings & summary.',
+        indexingStatus,
+        isDuplicate: true,
+      });
+    } else {
+      onStatusUpdate?.({
+        step: 'ready',
+        message: `Indexed into Qdrant Cloud (${chunksCount} vector chunks).`,
+        indexingStatus,
+        isDuplicate: false,
+      });
+    }
+  } catch (err) {
+    console.warn('Backend summarizer/indexing error, falling back:', err);
+    summaryText = `Uploaded ${fileName} (${fileSize}). Ready for vector search and AI querying.`;
+    onStatusUpdate?.({ step: 'error', message: 'Upload completed with offline fallback.' });
   }
 
   // Determine text snippet to display
@@ -95,16 +124,20 @@ export async function processUploadedDocument(file) {
   if (typeof content === 'string' && !content.startsWith('data:')) {
     extractedSnippet = content.slice(0, 5000);
   } else {
-    extractedSnippet = `[Document: ${fileName} (${fileExt.toUpperCase()})]\n${summaryText}\n\nBinary file successfully processed and indexed into private knowledge memory.`;
+    extractedSnippet = `[Document: ${fileName} (${fileExt.toUpperCase()})]\n${summaryText}\n\nBinary file successfully processed and indexed into Qdrant Cloud vector memory.`;
   }
 
   return {
-    id: `doc-${Date.now()}`,
+    id: docId,
     name: fileName,
     size: fileSize,
     uploadedAt: new Date().toISOString().split('T')[0],
     extractedText: extractedSnippet,
     summary: summaryText,
+    indexingStatus,
+    isDuplicate,
+    chunksCount,
+    contentHash,
   };
 }
 
@@ -112,11 +145,26 @@ export async function processUploadedDocument(file) {
  * Queries the document content using the backend AI provider router.
  * First tries semantic search from Qdrant vector memory, then prompts the AI assistant.
  */
-export async function queryDocumentAI(documentText, question) {
+export async function queryDocumentAI(documentText, question, { documentId = null, documentHash = null, fileName = null } = {}) {
   if (!question || !question.trim()) return '';
 
   try {
-    // 1. Try semantic search in private knowledge base
+    // 1. Try dedicated document Q&A endpoint grounded in Qdrant vectors
+    try {
+      const askRes = await apiAskDocumentQuestion(question.trim(), {
+        documentId,
+        documentHash,
+        fileName,
+        documentText: documentText ? documentText.slice(0, 4000) : null,
+      });
+      if (askRes && askRes.answer) {
+        return askRes.answer;
+      }
+    } catch {
+      // Fall through to semantic search + chat
+    }
+
+    // 2. Try semantic search in private knowledge base
     let contextStr = '';
     try {
       const searchHits = await apiSearchKnowledge(question.trim(), null, 3);
@@ -127,7 +175,7 @@ export async function queryDocumentAI(documentText, question) {
       // Vector search optional
     }
 
-    // 2. Fall back to extracted text snippet if no hits
+    // 3. Fall back to extracted text snippet if no hits
     if (!contextStr && documentText) {
       contextStr = documentText.slice(0, 3500);
     }
@@ -143,3 +191,4 @@ export async function queryDocumentAI(documentText, question) {
     return `Unable to process query: ${err.message || 'AI engine is currently unavailable.'}`;
   }
 }
+

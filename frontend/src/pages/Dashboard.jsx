@@ -133,7 +133,17 @@ export default function Dashboard() {
       {/* Quick Actions Shortcuts */}
       <div className="space-y-3">
         <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">Quick Actions</h3>
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+          <button
+            onClick={() => navigate('/deep-dive')}
+            className="p-4 rounded-2xl bg-white dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800 shadow-sm hover:border-purple-500/40 hover:scale-105 transition-all flex flex-col items-center gap-2 text-center group"
+          >
+            <div className="w-10 h-10 rounded-xl bg-purple-500/10 text-purple-500 flex items-center justify-center group-hover:bg-purple-600 group-hover:text-white transition-colors">
+              <LuBrain className="w-5 h-5" />
+            </div>
+            <span className="text-xs font-bold text-slate-700 dark:text-slate-200">Deep Dive</span>
+          </button>
+
           <button
             onClick={() => navigate('/tasks')}
             className="p-4 rounded-2xl bg-white dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800 shadow-sm hover:border-purple-500/40 hover:scale-105 transition-all flex flex-col items-center gap-2 text-center group"

@@ -14,10 +14,10 @@ import {
  * Communicates with the FastAPI backend (/api/chat), routing through
  * Gemini / Groq / OpenRouter with agent tool execution.
  */
-export async function generateAIResponse(prompt, conversationId = null) {
+export async function generateAIResponse(prompt, conversationId = null, docMetadata = null) {
   if (!prompt || !prompt.trim()) return '';
   try {
-    const reply = await apiSendChatMessage(prompt.trim(), conversationId);
+    const reply = await apiSendChatMessage(prompt.trim(), conversationId, docMetadata);
     return reply;
   } catch (err) {
     console.error('Error in generateAIResponse:', err);
@@ -62,38 +62,13 @@ export async function deleteChatHistory() {
 }
 
 /**
- * Generate interactive Deep Dive mind map using backend /api/deep-dives.
+ * Generate interactive Deep Dive mind map session using backend /api/deep-dives.
  */
 export async function generateDeepDiveMap(topic) {
   const cleanTopic = topic ? topic.trim() : 'Artificial Intelligence';
   try {
     const session = await apiCreateDeepDive(cleanTopic);
-    const nodes = session?.knowledge_map?.nodes || [];
-    return {
-      id: session.id,
-      topic: session.topic || cleanTopic,
-      nodes: nodes.map((n) => ({
-        id: n.id,
-        label: n.label,
-        type: n.parent ? 'concept' : 'root',
-        description: n.summary || `Explore ${n.label}.`,
-        difficulty: n.difficulty || 'Beginner',
-      })),
-      challenges: [
-        {
-          id: 'q1',
-          question: `What is the core focus when learning ${cleanTopic}?`,
-          options: [
-            'A) Theoretical comprehension',
-            'B) Practical application',
-            'C) Both theory & application',
-            'D) Memorization',
-          ],
-          answer: 2,
-        },
-      ],
-      progress: 60,
-    };
+    return session;
   } catch (err) {
     console.error('Failed to create deep dive map:', err);
     throw err;
@@ -101,8 +76,8 @@ export async function generateDeepDiveMap(topic) {
 }
 
 /**
- * Request concept-specific AI explanation or challenge quiz.
+ * Request concept-specific AI explanation, example, comparison, question or challenge quiz.
  */
-export async function requestDeepDiveAction(sessionId, concept, action, prompt = null) {
-  return await apiDeepDiveAction(sessionId, concept, action, prompt);
+export async function requestDeepDiveAction(sessionId, concept, action, prompt = null, relatedConcepts = []) {
+  return await apiDeepDiveAction(sessionId, concept, action, prompt, relatedConcepts);
 }

@@ -26,10 +26,25 @@ class OpenAICompatibleProvider(BaseAIProvider):
     model_name = "MODEL"
 
     def __init__(self, *, api_key: str, model: str, base_url: str) -> None:
+        self._api_key = api_key
         self._model = model
-        self._client: AsyncOpenAI | None = (
-            AsyncOpenAI(api_key=api_key, base_url=base_url) if api_key else None
-        )
+        self._base_url = base_url
+        self._client: AsyncOpenAI | None = None
+        self._bound_loop = None
+
+    def _get_client(self) -> AsyncOpenAI | None:
+        if not self._api_key:
+            return None
+        import asyncio
+        current_loop = None
+        try:
+            current_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            pass
+        if self._client is None or self._bound_loop != current_loop:
+            self._client = AsyncOpenAI(api_key=self._api_key, base_url=self._base_url, max_retries=0)
+            self._bound_loop = current_loop
+        return self._client
 
     async def chat_completion(
         self,
@@ -38,7 +53,8 @@ class OpenAICompatibleProvider(BaseAIProvider):
         tool_choice: str | dict[str, Any] | None = None,
     ) -> AIProviderResponse:
         prov_key = self.provider_name.lower()
-        if not self._client:
+        client = self._get_client()
+        if not client:
             raise AIProviderConfigurationError(
                 f"{self.provider_name} is not configured. Set {self.key_name} in backend/.env.",
                 provider=prov_key,
@@ -62,7 +78,7 @@ class OpenAICompatibleProvider(BaseAIProvider):
             kwargs["tool_choice"] = tool_choice or "auto"
 
         try:
-            response = await self._client.chat.completions.create(**kwargs)
+            response = await client.chat.completions.create(**kwargs)
             choice = response.choices[0].message
             tool_calls: list[ToolCallItem] = []
             for tool_call in choice.tool_calls or []:
